@@ -1,6 +1,3 @@
-[user]
-    email = $WORK_EMAIL
-    name = $FULL_NAME
 [alias]
     alias = config --get-regexp alias   # Show all aliases
     ############

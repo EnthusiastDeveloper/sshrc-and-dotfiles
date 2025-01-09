@@ -50,6 +50,12 @@ export DEBEMAIL='$FULL_NAME <$WORK_EMAIL>'
 #View pacdiff files in sublime text 3
 export DIFFPROG=subl
 
+# Set git-author and git-commiter name and email
+export GIT_AUTHOR_NAME="$FULL_NAME"
+export GIT_AUTHOR_EMAIL="$WORK_EMAIL"
+export GIT_COMMITTER_NAME="$FULL_NAME"
+export GIT_COMMITTER_EMAIL="$WORK_EMAIL"
+
 # Enable history expansion with space
 # E.g. typing !!<space> will replace the !! with your last command
 bind Space:magic-space
