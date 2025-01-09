@@ -1,0 +1,262 @@
+#!/bin/bash
+
+#############################################################
+## This file contains aliases and functions for kubernetes ##
+#############################################################
+
+alias k='kubectl'
+alias kp='k get pods'
+alias wkp='watch kp'
+alias kpw='kp -o wide'
+
+## List all containers in a given pod
+kpc() {
+    if [ $# -lt 1 ]; then
+        kp -o="custom-columns=NAME:.metadata.name,CONTAINERS:.spec.containers[*].name"
+    else
+        local ns="${2:-default}"
+        kp "$1" -n "$ns" -o jsonpath='{.spec.containers[*].name}'; echo ''
+    fi
+}
+
+_kpc() {
+    latest="${COMP_WORDS[$COMP_CWORD]}"
+    output=$(kp | awk '/^[^NAME]/ {print $1}')
+    mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+}
+
+complete -F _kpc kpc
+
+kpf() {
+    if [ $# -lt 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <filter>"
+        return
+    fi
+    kpc | $(which grep) "$1" | awk '{print $1}'
+}
+
+## List all pods (unique) and their included containers
+ls-pods() {
+    pods=$(kp | awk '/^[^NAME]/ {print $1}')
+    filtered_pods=$(echo "$pods" | tr ' ' '\n' | sed -E 's/-[[:digit:]](-[[:digit:]])*$//g' | sort -u)
+
+    # Calculate the length of the longest string
+    max_len=0
+    for pod in $filtered_pods; do
+        length=${#pod}
+        if [ "$length" -gt "$max_len" ]; then
+            max_len=$length
+        fi
+    done
+
+    for pod in $filtered_pods; do
+        # get the full pod name from "$pods" in order to list the containers
+        pod_name=$(echo "$pods" | tr ' ' '\n' | $(which grep) "^$pod" | head -1)
+        containers=$(kpc "$pod_name")
+        # test if "$1" exists and equals to "--pretty"
+        if [ "$1" == "--pretty" ]; then
+            printf "%*s: %s\n" "$max_len" "$pod" "$containers"
+        else
+            echo "$pod: $containers"
+        fi
+    done
+}
+
+## Exec a command in a given pod/container. If no command is passed - start new shell session
+to-exec() {
+    if [ $# -lt 1 ]; then
+        echo "Usage:  ${FUNCNAME[0]} <pod> <container> [cmd]" ; return
+    fi
+    if [ -z "$3" ]; then cmd="/bin/bash"; else cmd=${*:3}; fi
+    if [ -n "$2" ]; then container="-c $2" ; else container=""; fi
+
+    eval k exec -it "$1" "$container" -- "${cmd}"
+}
+
+
+## Completion function for to-exec
+_complete_pod_and_container() {
+    _init_completion || return
+
+    case "$cword" in 
+        1)
+            # Completing the first argument - pod name
+            local pods
+            pods=$(kp | awk '/^[^NAME]/ {print $1}')
+            mapfile -t COMPREPLY < <(compgen -W "$pods" -- "${COMP_WORDS[COMP_CWORD]}")
+            ;;
+        2) 
+            # Completing the second argument - container name without the -c flag
+            local containers
+            containers=$(kpc "${COMP_WORDS[1]}")
+            mapfile -t COMPREPLY < <(compgen -W "$containers" -- "${COMP_WORDS[COMP_CWORD]}")
+            ;;
+        *)
+            COMPREPLY=()
+            ;;
+    esac
+}
+
+complete -F _complete_pod_and_container to-exec
+
+function kl() {
+    if [ $# -lt 1 ]; then
+        echo "Usage:  ${FUNCNAME[0]} <pod> <container> [filters]" ; return
+    fi
+    local args, container
+    if [ -n "$3" ]; then args=${*:3}; else args=""; fi
+    if [ -n "$2" ]; then container="-c $2"; else container=""; fi
+
+    eval k logs "$1" "$container" --timestamps "${args}"
+}
+
+complete -F _complete_pod_and_container kl
+
+alias to-confd='k exec vcmts-m-0 -itc confd -- bash'
+alias to-ipdr='k exec vcmts-m-0 -itc ipdr -- bash'
+alias to-psql='k exec -it postgresql-0 -- psql odb odb_user'
+alias psql-query='k exec -i postgresql-0 -- psql odb odb_user -c'
+
+########### CLI related aliases ###########
+alias uninteractive-cli='k exec vcmts-m-0 -ic confd -- su admin'
+
+function to-cli() {
+    if [ $# -eq 0 ]; then
+        k exec vcmts-m-0 -itc confd -- su admin
+    else
+        echo "$@" | uninteractive-cli
+    fi
+}
+alias scm='to-cli scm'
+alias cms='scm'
+alias rpds='to-cli scr'
+alias clustat='to-cli "show cluster status"'
+alias corever='to-cli "show version"'
+alias showver=corever
+
+
+function to-snmp  {
+    if [ $# -eq 0 ]; then
+        k exec vcmts-m-0 -itc snmp -- bash
+    else
+        mgmt_ip=$(k exec vcmts-m-0 -itc snmp -- ip a s mgmt | awk '/inet / {print $2}' | cut -d/ -f1)
+        echo "$@" | k exec vcmts-m-0 -ic snmp -- snmpwalk -v 2c -c public "$mgmt_ip" "$@"
+    fi
+}
+
+## Function to execute a given query in a loop and log the output to a file
+function psql-query-log() {
+    if [ $# -lt 2 ]; then
+        echo "Usage: ${FUNCNAME[0]} <output_filename> <query>"
+        return
+    fi
+    local output_file="$1"
+    local query
+    query=${*:2}
+    # handle Ctrl+C
+    trap 'echo "Stopping psql logging. Output file: $output_file"; exit' INT KILL
+
+    while true; do
+        date >> "$output_file"
+        psql-query "$query" >> "$output_file"
+        sleep 1
+    done
+}
+
+# alias ipdr-log-set='k exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*"'
+function ipdr-log-set() {
+    local log_level="${1:-info}"
+    k exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*" "$log_level"
+}
+
+_optional_log_levels() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local log_levels="debug info trace warn error"
+    COMPREPLY=( $(compgen -W "$log_levels" -- "$cur") )
+}
+
+complete -F _optional_log_levels ipdr-log-set
+
+alias ipdr-log='k logs vcmts-m-0 -c ipdr --timestamps '
+
+
+# Iterate over all pods and containers and search for a given string in the logs
+# If the optional flag -s or --save is passed, the logs that match the search string will be saved to files
+function search_all_k8s_logs() {
+    if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+        echo "Usage: search_all_k8s_logs <search-string> [-s|--save]"
+        return 1
+    fi
+
+    search_string="$1"
+    save_logs=false
+
+    if [ "$2" = "-s" ] || [ "$2" = "--save" ]; then
+        save_logs=true
+    fi
+
+    echo "Searching for: $search_string"
+    echo "-----------------------------------"
+
+    kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}' | while read namespace pod; do
+        echo "Namespace: $namespace, Pod: $pod"
+        containers=$(kubectl get pod $pod -n $namespace -o jsonpath='{.spec.containers[*].name}')
+        for container in $containers; do
+            echo "  Container: $container"
+            if $save_logs; then
+                if kubectl logs $pod -n $namespace -c $container 2>/dev/null | $(which grep) -q -i "$search_string"; then
+                    log_file="${namespace}_${pod}_${container}.log"
+                    echo "    Match found. Saving log to $log_file"
+                    kubectl logs $pod -n $namespace -c $container > "$log_file"
+                else
+                    echo "    No matches found"
+                fi
+            else
+                kubectl logs $pod -n $namespace -c $container 2>/dev/null | $(which grep) -i "$search_string" || echo "    No matches found"
+            fi
+        done
+        echo "-----------------------------------"
+    done
+}
+
+
+
+# Start an interactive bash session inside mulpi container. Pod number is passed with argument.
+function to-mulpi() {
+    if [ -z "$1" ]; then
+        command="k exec -itc mulpi vcmts-cd-0-0 -- bash"
+    else
+        command="k exec $1 -itc mulpi -- bash"
+    fi
+
+    echo "Executing $command"
+    eval "$command"
+}
+
+_cd_pods() {
+    latest="${COMP_WORDS[$COMP_CWORD]}"
+    output=$(kp | awk '/vcmts-cd/ {print $1}')
+    mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+}
+
+complete -F _cd_pods to-mulpi
+
+# Start an interactive bash session inside a snooping container based on passed pod
+function to-snooping() {
+    if [ -z "$1" ]; then
+        command="k exec vcmts-m-0 -itc snooping -- bash"
+    else
+        command="k exec $1 -itc snooping -- bash"
+    fi
+
+    echo "Executing $command"
+    eval "$command"
+}
+
+_snooping_pods() {
+    latest="${COMP_WORDS[$COMP_CWORD]}"
+    output=$(kpf snooping | awk '{print $1}' | tr -d ':')
+    mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+}
+
+complete -F _snooping_pods to-snooping

@@ -1,0 +1,197 @@
+#!/bin/bash
+
+##############  Schroot related functions  ##############
+
+current_pi="PI41"
+default_schroot="$current_pi-apollo"
+log_file="/tmp/buildlog"
+
+## Phone notification settings using Android 'ntfy' app
+mobile_notification=true
+# NTFY_URI='ntfy.sh/<your_ntfy_channel>'
+
+## Slack notification settings. Only to be executed on laptop
+slack_notification=true
+slack_script_hostname="$(hostname)"
+slack_msg_script_path="$HOME/.local/bin/slack-message"
+
+compilation_threads=4
+default_temp_schroot="$default_schroot-temp"
+local_apollo_release_path="$HOME/git_repositories/swpkg/apollo-release"
+builder_apollo_release_path="$HOME/git_repos/apollo-release"
+
+
+## Autocompletion function returning the list of available schroots
+function _current_schroots()
+{
+    latest="${COMP_WORDS[$COMP_CWORD]}"
+    output=$(nsg-schroot list-all | awk '/^chroot::/ {print $2}')
+    mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+}
+
+get_matching_schroot()
+{
+	if [ $# -eq 1 ] && [ -n "$1" ]; then
+		schroot="$1"
+	else
+		schroot="${default_schroot}"
+	fi
+
+	matching_schroot="$(nsg-schroot list-all | awk -v"sch=$schroot" '{if ($1=="chroot::" && match($2, sch)) {print $2;exit;}}' )"
+	echo "$matching_schroot"
+}
+
+slack_message() { $slack_msg_script_path "$1"; }
+
+buildn()
+{
+	# Build a package using a given schroot (or default if non provided)
+	schroot=$(get_matching_schroot "$1")
+	package_name=$(basename "$(pwd)")
+
+	echo "Building $package_name using $schroot. Log file is at: $log_file"
+
+	nsg-schroot-run "$schroot" -- dpkg-buildpackage -us -uc -b -j$compilation_threads >> $log_file 2>&1
+	build_retcode=$?
+	if [ $build_retcode -ne 0 ]; then
+		msg="Compilation of $package_name using $schroot has failed."
+
+		echo "$msg"
+		[ "$mobile_notification" = true ] && curl -d "$(cat $log_file)" \
+		-H "Title: $msg" \
+		-H 'Priority: high' \
+		-H "Tags: rotating_light,warning,rotating_light" \
+		"$NTFY_URI" > /dev/null 2>&1
+
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ]  && slack_message ":skull: $msg :skull:"
+	else
+		msg="Compilation of $package_name using $schroot successfully finished."
+
+		echo "$msg"
+		[ "$mobile_notification" = true ] && curl -d "$msg" \
+		-H 'Title: Compilation passed!' \
+		-H 'Priority: default' \
+		-H "Tags: partying_face,tada" \
+		"$NTFY_URI" > /dev/null 2>&1
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && slack_message ":dance_penguin::partying_face: $msg :partying_face::dance_penguin:"
+
+		\rm "$log_file"
+	fi
+}
+complete -F _current_schroots buildn
+
+builddn()
+{
+	# Build dependencies for a package using a given schroot (or default if not provided)
+	# If successful - compile the package as well
+	schroot=$(get_matching_schroot "$1")
+
+	echo "Building dependencies for $package_name using $schroot. Log file is at: $log_file"
+	package_name=$(basename "$(pwd)")
+	nsg-schroot build-deps "$schroot" . > $log_file 2>&1
+	deps_retcode=$?
+	if [ $deps_retcode -ne 0 ]; then
+		msg="Error on $package_name build-deps using $schroot."
+
+		echo "$msg"
+		[ "$mobile_notification" = true ] && curl -d "$(cat $log_file)" \
+		-H "Title: $msg" \
+		-H 'Priority: urgent' \
+		-H "Tags: rotating_light" \
+		"$NTFY_URI" > /dev/null 2>&1
+
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && slack_message ":tired_face: $msg :tired_face:"
+	else
+		buildn "$schroot"
+	fi
+}
+complete -F _current_schroots builddn
+
+nsg-schroot-recreate()
+{
+    # Destroys a given schroot and re-create it
+	if [ $# -eq 1 ] && [ -n "$1" ]; then
+		schroot="$1"
+	else
+		schroot="${default_temp_schroot}"
+	fi
+    
+    echo "==> Closing old schroot sessions"
+    for s in $(nsg-schroot list-all | awk '{if($1 == "session::") {print $2}}'); do nsg-schroot session-end "$s"; done
+    
+    echo "==> Removing old schroot"
+    sudo nsg-schroot destroy "$schroot"
+
+    echo -e "\n==> Updating release directory for schroot"
+    cur_dir="$(pwd)"
+	#  if hostname starts with "il-edge-builder" - use the builder's release path
+	if [[ "$(hostname)" == "il-edge-builder"* ]]; then
+		release_path="$builder_apollo_release_path"
+	elif [[ "$(hostname)" == "lap1403" ]]; then
+		release_path="$local_apollo_release_path"
+	fi
+
+	cd "$release_path" || return 1
+	git checkout "release/$current_pi"
+	git pull
+	cd "$cur_dir" || return 1
+
+	echo -e "\n==> Creating new schroot"
+	sudo nsg-schroot create "$schroot" "$release_path"
+	nsg-schroot set-ccache "$schroot"
+}
+complete -F _current_schroots nsg-schroot-recreate 
+
+
+## Fast compilation - can only be executed from inside a schroot
+dpkg_fast() {
+    cd build && make -j16
+    cd ..
+    rm debian/*.log
+    rm debian/autoreconf*
+    dpkg-buildpackage -uc -us -nc "$*"
+}
+
+#########################################################
+
+
+fix_sonar() {
+    if [[ -z $1 ]]; then
+        echo "Usage ${FUNCNAME[0]} <issue description>"
+        return 1
+    fi
+    git cm "fix sonarqube issue - $1"
+}
+
+
+alias gp='git chm && git pl && git ch feature/CBLOS-150948-use-bookworm-s-log4cxx-to-optimize-log-patterns-for-size-and-readability'
+alias gc='git au && git cm "Update logger output format" && git ps'
+
+
+prep() {
+	dir="$(basename "$(pwd)")"
+	src_dir="$HOME/git_repositories/_schroots/exo-builder/Releases/vcmts-release/branches/PI20/Docker/containers.d/$dir/"
+	for f in $(ls "$src_dir"); do
+		cp -a "$src_dir$f" .
+	done
+	\rm ContainerManifest
+	maintainer="$(grep -i maintainer Dockerfile.in | cut -d' ' -f3,4,5- | tr -d '"')"
+	sed -i "s/<maintainer>/\"$(grep -i maintainer Dockerfile.in | cut -d' ' -f3,4,5- | tr -d '"')\"/g" nsg-cbuilder.yml
+	sed -i "/LABEL maintainer \"$maintainer\"/d" Dockerfile.in
+	git add .gitignore Dockerfile.in PackageList nsg-cbuilder.yml
+	gits
+	echo "if everything looks good - execute 'bld' alias to build the container"
+}
+
+rebase() {
+	pkgs="cos-libdp2mp cosm-mon cosm-pktc cosm-snmp dp-api fdx-controller md-coord nsg-libsup olt-d-slow-path slowpathd ulc-mulpi ulc-scheduler ulc-uspp-dpdk"
+	work_dir="$HOME/git_repositories/swpkg"
+	orig_dir="$(pwd)"
+	[[ "$orig_dir" != "$work_dir" ]] && cd "$work_dir" || exit
+	for pkg in $pkgs; do
+		cd "$pkg" || exit
+		git um && git rebase main && git psf
+		cd .. || exit
+	done
+	[[ "$orig_dir" != "$work_dir" ]] && cd "$orig_dir" || exit
+}

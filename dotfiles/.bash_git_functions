@@ -1,0 +1,253 @@
+#! /bin/bash
+
+######################################################################
+## This script provides functions to interact with git repositories ##
+######################################################################
+
+
+# Switch to side-branch based on partial string of its name
+function git-chb() {
+    [[ -z $1 ]] && echo -e "Error! argument is missing.\nUsage: ${FUNCNAME[0]} <partial string from target branch>" && return 1
+    local br
+    br="$(git branch --color=never | $(which grep) "$1" | tr -d ' ')"
+
+    [[ "$br" =~ ^\* ]] && echo "This is already the active branch." && return
+    [[ -z "$br" ]] && echo "Error: couldn't find any local branch that matches \"$1\"" && return 1
+    [[ $(echo "$br" | wc -l) -gt 1 ]] && echo -e "There is more than one branch matching your input:\n$br" && return 1
+
+    git checkout "$br"
+}
+
+# Function to get the current main branch dynamically
+function git-get-main-branch {
+    local main_branch
+    main_branch=$(basename "$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null)")
+    echo "${main_branch#refs/heads/}"
+}
+
+# Switch to main branch of a git repository, pull changes from origin, and switch back to your current working branch
+function git-update-main-branch {
+    if [ ! -d .git ] && ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "Error: Current directory is not a Git repository."
+        return 1
+    fi
+
+    local main_branch
+    local current_branch
+
+    main_branch=$(git-get-main-branch)
+    if [ -z "$main_branch" ]; then
+        echo "Error: Failed to determine the main branch."
+        return 1
+    fi
+
+    current_branch="$(git symbolic-ref --short HEAD 2>/dev/null)"
+    if [[ "$current_branch" != "$main_branch" ]]; then
+        git checkout "$main_branch" || { echo "Failed to switch to $main_branch"; return 1; }
+        branch_change=true
+    fi
+    git pull origin "$main_branch" || { echo "Failed to pull updates from origin"; return 1; }
+    [ "$branch_change" ] && git checkout "$current_branch"
+}
+
+# Iterates over all directories inside the current directory and updates their main branch
+function git-mass-update {
+    local logfile
+    local errors_counter
+    logfile="/tmp/${FUNCNAME[0]}.log"
+    truncate -s 0 "$logfile"
+    errors_counter=0
+
+    dirs="$(ls -d ./*/)"
+    for dir in $dirs; do
+        echo -e "\n\n##### $(basename "$dir"):"
+        cd "$dir" || { echo "Error: Fail to enter directory $dir"; return 1; }
+        if ! git-update-main-branch; then
+            ((errors_counter++))
+            echo "Encountered errors in: $dir" >> "$logfile"
+        fi
+        cd ..
+    done
+    if [[ -n $errors_counter ]]; then
+        echo "A total of $errors_counter issues were encountered. See log for detail: $logfile"
+    else
+        echo "${FUNCNAME[0]} finished successfully."
+    fi
+}
+
+# Helper function to pause execution and prompt user to continue
+function pause_and_continue {
+    read -rp "Press Enter to continue after resolving the issue..."
+}
+
+## Update and rebase a given branch on top of main branch. If the branch name is not provided - do the operation over the current branch.
+## This function is intended to be executed inside the top level directory of a git repository.
+## Example usage: git-rebase-on-main [target_dir] [side_branch] [push] (yes/no)
+##      Defaults:
+##          target_dir: current directory
+##          side_branch: current branch
+##          push: false
+##      Acceptable positive values for dry-run are 'yes' (case-insensitive) and 'true'
+function git-rebase-on-main() {
+    if [ "$#" -gt 3 ]; then
+        echo "Usage: ${FUNCNAME[0]} [target_dir] [side_branch] [push]"
+        return 1
+    fi
+
+    local push="No"
+    local target_dir
+    local side_branch
+
+    if [ "$#" -ge 1 ]; then
+        target_dir="$1"
+
+        # Change directory to the path provided
+        [ ! -d "$target_dir" ] && { echo "Error: Couldn't find $target_dir."; return 1; }
+        cd "$target_dir" || exit;
+        echo -e "\n\n\tWorking on $target_dir"
+
+        # Validate that the repository is a Git repository
+        git rev-parse --git-dir > /dev/null 2>&1 || { echo "Error: Not a Git repository."; return 1; }
+    fi
+
+    if [ "$#" -ge 2 ]; then
+        side_branch="$2"
+    else
+        side_branch="$(git rev-parse --abbrev-ref HEAD)"
+    fi
+
+    if [ "$#" -eq 3 ]; then
+        push="$3"
+    fi
+
+    # Validate the existence of the side branch
+    git rev-parse --quiet --verify "$side_branch" > /dev/null 2>&1 || { echo "Error: Side branch '$side_branch' not found."; return 1; }
+
+    # Step 1: Get the current main branch
+    local main_branch
+    main_branch=$(git-get-main-branch)
+    if [ -z "$main_branch" ]; then
+        echo "Failed to determine the main branch. Skipping."
+        return
+    fi
+
+    # Step 2: Fetch updates from the remote server
+    git fetch origin "$main_branch" || { echo "Failed to fetch updates from origin."; pause_and_continue; }
+
+
+    # Step 3: Rebase the side branch over main
+    if ! git checkout "$side_branch" || ! git rebase origin/main; then
+        echo "Error: Failed to rebase the side branch over main."; pause_and_continue;
+    fi
+
+    # Update the commit timestamp
+    git commit --amend --date="$(date -R)" --no-edit > /dev/null
+
+    # Step 4: Force-push changes to the remote server (if not in dry-run mode)
+    if [[ "$push" =~ ^([Yy].*|true) ]]; then
+        echo "Changes will not be pushed to the remote server."
+    else
+        git push --force-with-lease origin "$side_branch" || { echo "Error: Failed to push changes to the remote server."; pause_and_continue; }
+    fi
+
+    # Change dir back to the previous directory
+    if [ -e "$target_dir" ]; then
+        cd - || return 1
+    fi
+}
+
+## Mass update and rebase of a given branch on top of main branch, of multiple git repositories.
+##                                <input_file>     <side_branch>        <push> <parallel_jobs>
+## Example usage: git-mass-rebase "input_file.txt" "your_side_branch_name" true 4
+function git-mass-rebase {
+    # Validate command-line arguments
+    if [ "$#" -ne 4 ]; then
+        echo "Usage: ${FUNCNAME[0]} <input_file> <side_branch> <push> <parallel_jobs>"
+        return 1
+    fi
+
+    local input_file="$1"
+    local side_branch="$2"
+    local push="$3"
+    local parallel_jobs="$4"
+
+    # Validate input file
+    if [ ! -f "$input_file" ]; then
+        echo "Error: Input file not found: $input_file"
+        return 1
+    fi
+
+    # Log script parameters
+    echo "Script parameters: input_file=$input_file, side_branch=$side_branch, push=$push, parallel_jobs=$parallel_jobs"
+
+    # Determine the number of CPUs available for parallel execution
+    local cpu_count
+    cpu_count=$(nproc)
+
+    # Determine the actual number of parallel jobs to use
+    local jobs
+    if [ "$parallel_jobs" -gt 0 ] && [ "$parallel_jobs" -le "$cpu_count" ]; then
+        jobs="$parallel_jobs"
+    else
+        jobs="$cpu_count"
+    fi
+
+    # Iterate over directories in parallel
+    xargs -I{} -n 1 -P "$jobs" bash -c "source $HOME/.bash_functions && git-rebase-on-main '{}' '$side_branch' '$push'" < "$input_file"
+
+    echo "Script completed successfully"
+}
+
+## Function to clone all repositories listed in a given file (svnardeb-config/conf) and checkout the relevant branch
+## In case the repository already exists - it will checkout the main branch and pull the latest changes
+##
+## For SVN-based pipelines, get the list of repositories using these 2 commands:
+##    wget "http://il-exo-builder/svn/exo/Releases/apollo-release/branches/PI35/svnardeb-config/conf" -O /tmp/download.txt
+##    Usage: git-mass-clone /tmp/download.txt
+function git-mass-clone {
+    local filename
+    # Validate arguments
+    if [ "$#" -lt 1 ]; then
+        # Check if the current directory containes 'apollo-release'
+        if [ -d "apollo-release" ]; then
+            filename="apollo-release/svnardeb-config/conf"
+        else
+            echo "Usage: git-mass-clone <input_file>"
+            return 1
+        fi
+    fi
+
+    filename="$1"
+
+    if [ ! -f "$filename" ]; then
+        echo "Error: File not found - $filename."
+        return 1
+    fi
+
+    while IFS= read -r line; do
+        # Only operate over lines starting with '  <package'
+        if [[ ! "$line" =~ ^[[:space:]]*"<package" ]]; then
+            continue
+        fi
+        package_name=$(echo "$line" | awk -F'"' '{print $4}')
+        git_server=$(echo "$line" | awk -F'"' '{print $2}')
+        branch=$(echo "$line" | awk -F'"' '{print $8}')
+
+        # Skip 'apollo-release' since it is not a modifiable package
+        if [[ "$package_name" == "apollo-release" ]]; then
+            continue
+        fi
+        if [ ! -d "$package_name" ]; then
+            git clone "$git_server/$package_name.git"
+            # Checkout the relevant branch of the cloned repository
+            git -C "$package_name" checkout "$branch"
+        else
+            echo "Directory $package_name already exists. Updating content..."
+            cd "$package_name" || return 1
+            git checkout "$branch" && git pull
+            cd .. || return 1
+        fi
+        echo .
+    done < "$filename"
+    return
+}

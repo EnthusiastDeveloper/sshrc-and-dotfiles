@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Configuration file for bash scripts
+# The below information will be used in various bash functions and aliases
+
+FULL_NAME=""
+WORK_EMAIL=""
+WORK_USERNAME=""
+REMOTE_SETUP_USERNAME=""
+NTFY_URI=""
+
+
+export FULL_NAME
+export WORK_EMAIL
+export WORK_USERNAME
+export REMOTE_SETUP_USERNAME
+export NTFY_URI

@@ -1,0 +1,124 @@
+[user]
+    email = $WORK_EMAIL
+    name = $FULL_NAME
+[alias]
+    alias = config --get-regexp alias   # Show all aliases
+    ############
+    a = add
+    aa = add .          # Stage all changes in working directory + new un-tracked files, does not stage deletions
+    ap = add -p         # Stage specific lines of a given file
+    au = add -u         # Stage all changes and deletions, does not stage un-tracked files
+    ############
+    br = branch
+    brc = branch --show-current
+    brd = branch --delete
+    ############
+    cm = commit -m      # commit with a given message
+    cma = commit --amend
+    cmad = "!git cma --date=\"$(date -R)\" --no-edit > /dev/null"   # update the commit's date timestamp, do not stop for editting
+    ############
+    chr = cherry-pick
+    chra = cherry-pick --abort
+    chrc = "!git au && git cherry-pick --continue"
+    ############
+    ch = checkout
+    # chb = checkout -b
+    chm = checkout main
+    ############
+    d = diff
+    dn = diff --name-status # only show the names of modified files
+    dp = diff --no-color    # useful for exporting a diff to a patch file
+    ############
+    f = fetch
+    fo = fetch origin
+    fp = fetch --prune
+    ############
+    l = log --graph --branches --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
+    lb = !git log --graph --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s' main..$(git rev-parse --abbrev-ref HEAD)
+    reflog = reflog --date=format:'%Y-%m-%d %H:%M'
+    ############
+    patch = "!git --no-pager diff --no-color"  # Create patch file from current changes
+    ############
+    pl = pull
+    plom = pull origin main
+    pb = pull --rebase
+    pbo = pull --rebase origin
+    ############
+    ps = push
+    pso = push origin
+    psf = push --force-with-lease
+    ############
+    ra = rebase --abort
+    rbi = rebase -i main
+    rc = "!git au && git rebase --continue"  # stage modifications and continue the rebase
+    ############
+    remotes = remote -v
+    ############
+    s = status
+    sb = status -sb
+    ############
+    sh = show
+    shn = show --name-status
+    ############
+    stashs = stash list
+    ############
+    retag = "!sh -c 'git tag -f $1 $2 && git push origin :refs/tags/$1 && git push origin $1' -"
+    tags = tag -l       # list all tags
+    ############
+    stupid = reset --hard       # revert changes to a given commit
+    #########################################
+    # aliases that executes shell commands  #
+    #########################################
+    ac = "!git au && git cm"        # stage modifications and commit
+    acm = !"git au && git cm"       # stage modifications and commit
+    acma = "!git au && git cma"     # stage modifications and amend to previous commit
+    acp = "!f() { git add -u && git commit -m \"$1\" && git push; }; f"
+    acpf = "!git au && git cma --no-edit && git psf"
+    #########################################
+    # aliases that executes shell functions #
+    #########################################
+    um = !bash -c 'source $HOME/.bash_git_functions && git-update-main-branch'       # update main branch and return to current branch afterwards
+    chb = "!bash -c 'source $HOME/.bash_git_functions && git-chb \"$1\"' -"
+    fs = "!bash -c 'source $HOME/.bash_git_functions_schroot && fix_sonar \"$1\"' -" # Commit staged changes with sonarqube-related prefixed message
+[color]
+    ui = always
+[color "branch"]
+    current = yellow reverse
+    local = yellow
+    remote = green
+[color "diff"]
+    meta = yellow bold
+    frag = magenta bold
+    old = red bold
+    new = green bold
+    commit = yellow bold
+    whitespace = red reverse
+[color "status"]
+    added = yellow
+    changed = green
+    untracked = cyan
+[color "decorate"]
+    tag = blue
+[help]
+	autocorrect = 30
+[core]
+    whitespace = -trailing-space
+[diff]
+    tool = vscode
+[diff "zip"]
+    textconv = unzip -v
+[difftool "vscode"]
+    cmd = code --wait --diff $LOCAL $REMOTE
+[log]
+    decorate = true
+[rerere]
+    enabled = true
+[merge]
+    # tool = kdiff3
+    tool = vscode
+[mergetool "vscode"]
+    cmd = code --wait $MERGED
+[init]
+    defaultBranch = main
+[pull]
+	rebase = false

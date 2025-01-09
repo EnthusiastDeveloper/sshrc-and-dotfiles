@@ -1,0 +1,359 @@
+#!/bin/bash
+############################# 
+## This script provides functions to interact with usingit-edge.harmonicinc.com API, allowing to reserve, queue, release and check the status of a setup.
+## The script uses the following environment variables:
+## - SETUPNAME: the name of the setup to interact with
+## - USERNAME: the username to use for the reservation
+## - PASSWORD: the password to use for the reservation
+## - SETUPNOTEXISTS: set to 1 if the setup doesn't exist
+## The script provides the following functions:
+## - fetch_usingit: fetches the status of the setup
+## - reserve_setup: reserves the setup
+## - queue_setup: queues the setup
+## - release_setup: releases the setup
+#############################
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+ME=$WORK_USERNAME
+
+get_reservation_time_string() {
+    local timestamp
+    # Validate command-line arguments
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <timestamp>"
+        return 1
+    fi
+    timestamp="$1"
+    # No need to handle timestamp in "1:30" format
+    # If the timestamp is empty, return
+    if [ -z "$timestamp" ]; then
+        $timestamp=0
+    elif [[ "$timestamp" =~ ^[0-9]+[hH][[:space:]][0-9]+[mM]$ ]]; then
+        # If timestamp is in the "1H 30M" format, return it as seconds
+        echo $(convert_timestamp_to_seconds "$timestamp")
+    fi
+
+    echo "$timestamp"
+}
+
+convert_timestamp_to_seconds() {
+    local timestamp
+    # Validate command-line arguments
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <timestamp>"
+        return 1
+    fi
+    timestamp="$1"
+    awk '
+    {
+    # Initialize total seconds
+    total_seconds = 0
+
+    # Loop through each field in the input
+    for (i = 1; i <= NF; i++) {
+        # If the field contains hours (h), convert to seconds
+        if ($i ~ /[0-9]+h/) {
+            hours = substr($i, 1, length($i)-1)
+            total_seconds += hours * 3600
+        }
+        # If the field contains minutes (m), convert to seconds
+        else if ($i ~ /[0-9]+m/) {
+            minutes = substr($i, 1, length($i)-1)
+            total_seconds += minutes * 60
+        }
+    }
+
+    # Print total seconds
+    print total_seconds
+    }' <<< "$timestamp"
+}
+
+current_user(){
+	TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$1"'/details/')
+	USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
+	USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
+    [ -z "$USU" ] && return 1 || return 0
+}
+
+fetch_usingit(){
+	if [ -z "$SETUPNAME" ];then
+		return 0
+	fi
+	if ! command -v jq > /dev/null 2>&1; then
+        export SETUPNOTEXIST=1
+        return 0
+	fi
+	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+	TINFO=$(cat tinfo.txt)
+	$(which rm) tinfo.txt > /dev/null 2>&1
+	if [[ $RC == "404" || $RC == "502" ]]; then
+		export SETUPNOTEXISTS=1
+		return 0
+	fi
+	RID=$(echo "$TINFO" | jq -r '.active_reservation_id')
+	SID=$(echo "$TINFO" | jq -r '.id')
+	if [[ $RID == "null" ]]; then
+		echo -e "\n\t$GREEN${SETUPNAME^^} topology is free on usingit$NC"
+		echo -e "$BLUE\thttp://usingit-edge.harmonicinc.com/$SID/details/$NC\n"
+		return 0
+	fi
+    current_user "$SID"
+	if [[ -z $USU ]]; then
+		return 0
+	fi
+
+	TIME=$(echo "$TPLAIN" | $(which grep) -oP -m1 "data-countdown=\"\w+\"" | cut -c17- | rev | cut -c2- | rev)
+	MSG=""
+	if [ -z "$TIME" ]; then
+		MSG="${RED}but expired.$NC"
+	else
+		MSG="and will expire in $(date -d@"$TIME" -u +%H:%M:%S)"
+	fi
+	if [[ $USU == "$ME" ]]; then
+		echo -e "\n\t$BLUE${SETUPNAME^^} is in use by$NC$GREEN you $MSG$NC"
+	else
+		echo -e "\n\t$GREEN${SETUPNAME^^} is in use by$NC $RED${USU^^} $MSG$NC"
+	fi
+	echo -e "$BLUE\thttp://usingit-edge.harmonicinc.com/$SID/details/$NC\n"
+}
+
+reserve_setup(){
+	if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]];then
+                return 0
+	fi
+	if [[ -z $USERNAME ]]; then
+		printf "Username: "
+		read -r USERNAME
+	fi
+	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+    TINFO=$(cat tinfo.txt)
+	$(which rm) tinfo.txt
+	if [[ $RC == "404" ]]; then
+		export SETUPNOTEXISTS=1
+		return 0
+	fi
+	SID=$(echo "$TINFO" | jq -r '.id')
+	RID=$(echo "$TINFO" | jq -r '.active_reservation_id')
+	current_user "$SID"
+	if [[ $RID != "null" && $USU != "$USERNAME" ]]; then
+        echo -e "\n\t${RED}${SETUPNAME^^} already reserved by someone else $NO_COLOR"
+		fetch_usingit
+		return 0
+	fi
+	if [[ -z $PASSWORD ]]; then
+		printf "Password: "
+		stty -echo
+		read -r PASSWORD
+		stty echo
+		echo
+	fi
+	printf "Reservation purpose: "
+	read -r PURPOSE
+	PURPOSE=${PURPOSE:-"NO-PURPOSE"}
+	PURPOSE=${PURPOSE// /_}
+	printf "Time: "
+	read -r TIME
+	TIME=${TIME:-0}
+	RC=$(curl -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/reserve_setup_by_name/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"username": "'"$USERNAME"'","reservation_purpose": "'"$PURPOSE"'","should_run_health_check": false}')
+	RESPONSE=$(cat response.txt)
+	$(which rm) response.txt
+	case "$RC" in
+		400)
+			echo -e "\n\t${RED}User $USERNAME doesn't exist$NC\n"
+			export USERNAME=""
+			export PASSWORD=""
+			return 0
+			;;
+		403)
+			RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+			TINFO=$(cat tinfo.txt)
+			$(which rm) tinfo.txt
+			TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
+			USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
+			USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
+			if [[ "$USU" != "$USERNAME" ]]; then
+				echo -e "\n\t${RED}$(echo "$RESPONSE" | jq -r ".detail")$NC\n"
+				return 0
+			fi
+			DONT_PRINT=1
+			;;
+		404)
+			export SETUPNOTEXISTS=1
+			return 0
+			;;
+		*)
+			;;
+	esac
+	DETAILS=$(echo "$RESPONSE" | jq -r ".detail")
+        if [[ -n $DONT_PRINT ]]; then
+		unset DONT_PRINT
+        elif [[ $DETAILS == "null" ]]; then
+		echo -e "\n\t${GREEN}Successfully reserved ${SETUPNAME^^} setup$NC\n"
+	else
+        echo -e "\n\t${RED}Failed to reserve ${SETUPNAME^^} setup: $DETAILS$NC\n"
+		return 0
+	fi
+	if [[ $TIME == "0" ]]; then
+		return 0
+	fi
+	RID=$(echo "$RESPONSE" | jq -r '.reservation_id')
+
+	total_seconds=$(convert_timestamp_to_seconds "$TIME")
+	RESPONSE=$(curl -s -X 'PUT'  'http://usingit-edge.harmonicinc.com/api/update_reservation_settings/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"time": '$total_seconds'}')
+	echo -e "\t$GREEN$(echo "$RESPONSE" | jq -r '.detail')$NC\n"
+}
+
+queue_setup() {
+    if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]];then
+		return 0
+	fi
+
+    RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+	TINFO=$(cat tinfo.txt)
+	$(which rm) tinfo.txt
+	if [[ $RC == "404" ]]; then
+		export SETUPNOTEXISTS=1
+		return 0
+	fi
+	RID=$(echo "$TINFO" | jq -r '.active_reservation_id')
+
+    if [[ -z $USERNAME ]]; then
+        printf "Username: "
+        read -r USERNAME
+    fi
+
+    if [[ $RID == "null" ]]; then
+		echo -e "\n\t${RED}${SETUPNAME^^} is free... $NO_COLOR"
+		reserve_setup
+		return 0
+	fi
+    if [[ $USU == "$USERNAME" ]]; then
+        echo -e "\n\t${RED}You are already the user of this reservation $NO_COLOR"
+        return 0
+    fi
+
+	SID=$(echo "$TINFO" | jq -r '.id')
+    echo "$TINFO" > /tmp/tinfo.json
+
+    if [[ -z $PASSWORD ]]; then
+		printf "Password: "
+		stty -echo
+		read -r PASSWORD
+		stty echo
+		echo
+	fi
+	printf "Reservation purpose: "
+	read -r PURPOSE
+	PURPOSE=${PURPOSE:-"NO-PURPOSE"}
+	PURPOSE=${PURPOSE// /_}
+	printf "Time: "
+	read -r TIME
+	TIME=${TIME:-0}
+    reservation_time=$(get_reservation_time_string "$TIME")
+    curl_data='{"username": "'"$USERNAME"'","queue_'$SID'-reservation_time": "'"$reservation_time"'","queue_'$SID'-reservation_time_choice": "Custom", "queue_'$SID'-purpose": "'"$PURPOSE"'","queue_'$SID'-should_run_health_check": false}'
+    echo "DEBUG: curl_data=$curl_data"
+	RC=$(curl -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/take_queue/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d  "$curl_data")
+	RESPONSE=$(cat response.txt)
+	$(which rm) response.txt
+
+    echo "DEBUG: RESPONSE=$RESPONSE with RC=$RC"
+
+    # Parse the reruened code
+    case "$RC" in
+        200)
+            echo -e "\n\t${GREEN}Successfully reserved ${SETUPNAME^^} setup$NC\n"
+            queue_id=$(echo "$RESPONSE" | jq -r '.queue_id')
+            ;;
+		400)
+			echo -e "\n\t${RED}User $USERNAME doesn't exist$NC\n"
+			export USERNAME=""
+			export PASSWORD=""
+			return 0
+			;;
+		403)
+			RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+			TINFO=$(cat tinfo.txt)
+			$(which rm) tinfo.txt
+			TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
+			USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
+			USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
+			if [[ "$USU" != "$USERNAME" ]]; then
+				echo -e "\n\t${RED}$(echo "$RESPONSE" | jq -r ".detail")$NC\n"
+				return 0
+			fi
+			DONT_PRINT=1
+			export USERNAME=""
+			export PASSWORD=""
+			;;
+		404)
+			export SETUPNOTEXISTS=1
+			return 0
+			;;
+		*)
+			;;
+	esac
+}
+
+release_setup(){
+	if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]]; then
+        return 0
+    fi
+	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+    TINFO=$(cat tinfo.txt)
+	$(which rm) tinfo.txt
+	if [[ $RC == "404" ]]; then
+		export SETUPNOTEXISTS=1
+		return 0
+	fi
+
+	RID=$(echo "$TINFO" | jq -r '.active_reservation_id')
+	SID=$(echo "$TINFO" | jq -r '.id')
+	if [[ $RID == "null" ]]; then
+		echo -e "\n\t${GREEN}Topology is free on usingit$NC\n"
+		return 0
+	fi
+	if [[ -z $USERNAME ]]; then
+		printf "Username: "
+		read -r USERNAME
+	fi
+
+	current_user "$SID"
+	if [[ $USU != "$USERNAME" ]]; then
+        echo -e "\n\t${RED}You are not the user of this reservation $NO_COLOR"
+		fetch_usingit
+		return 0
+	fi
+
+	if [[ -z $PASSWORD ]]; then
+		printf "Password: "
+		stty -echo
+		read -r PASSWORD
+		stty echo
+	fi
+
+	RC=$(curl -s -o release.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/release/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{
+  "should_run_health_check": true
+}')
+	case "$RC" in
+		403)
+			echo -e "\n\t${RED}Invalid username/password.$NC\n"
+			export USERNAME=""
+			export PASSWORD=""
+			return 0
+			;;
+		404)
+			echo -e "\n\t${RED}Reservation doesn't exist$NC\n"
+			return 0
+			;;
+		*)
+			;;
+	esac
+	RESPONSE=$(cat release.txt)
+	$(which rm) release.txt
+	DETAILS=$(echo "$RESPONSE" | jq -r ".detail")
+    echo -e "\n\t$GREEN$DETAILS$NC\n"
+}
