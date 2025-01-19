@@ -4,12 +4,11 @@
 
 #############  Colored Terminal  #############
 alias ls='$(which ls) --color=auto --group-directories-first -hF --time-style=locale'
-# Also show line numbers for grep
+
+alias grep='grep --color=auto --exclude=~/.bash_history'
+alias dir='dir --color=auto'
 alias ip='ip -c'
-alias grep='grep -n --color=auto --exclude=~/.bash_history'
-alias zgrep='zgrep -n --color=always'
-alias fgrep='fgrep --color=auto'
-alias egrep='egrep --color=auto'
+
 ##############################################
 
 
@@ -18,29 +17,43 @@ BUILDER="builder8"
 alias sshb='ssh $BUILDER'
 
 ## SSH and SCP using user 'dev'
-alias ssh='sshpass -f ~/.password_apollo sshrc'          # Requires 'sshpass'
+function ssh() {
+    # check if sshrc is installed
+    local command_to_run=$(command -v sshrc >/dev/null 2>&1 && echo "sshrc" || echo "ssh")
 
-# ssh() {
-#     # select sshpass file based on argument: '-a' for apollo, '-r' for RPD (admin), '-v' for vcmts
-#     while getopts 'ahrv' OPTION; do
-#         case $OPTION in
-#             a) pass_file="$HOME/.password_apollo" ;;
-#             h) pass_file="$HOME/.password_harmonic" ;;
-#             r) pass_file="$HOME/.password_apollo_admin" ;;
-#             v) pass_file="$HOME/.password_vcmts" ;;
-#             ?) echo "Usage: ${FUNCNAME[0]} [-a (apollo) | -r (RPD) | -v (VCMTS) | -h (harmonic)] <hostname>"; return 0 ;;
-#         esac
-#     done
+    # Select sshpass file based on argument: '-a' for apollo, '-r' for RPD (user=admin), '-v' for vcmts, '-h' for harmonic
+    while getopts 'ahrv' OPTION; do
+        case $OPTION in
+            a) pass_file=".password_apollo" ;;
+            h) pass_file=".password_harmonic" ;;
+            r) pass_file=".password_apollo_admin" ;;
+            v) pass_file=".password_vcmts" ;;
+            ?) echo "Usage: ${FUNCNAME[0]} [-a (apollo) | -r (RPD) | -v (VCMTS) | -h (harmonic)] <hostname>"; return 0 ;;
+        esac
+    done
 
-#     if [[ -f $pass_file ]]; then
-#         sshpass -f "$pass_file" sshrc
-#     else
-#         echo "Error: Password file $pass_file not found."
-#         return 1
-#     fi
-# }
+    # Set default password file for work accounts
+    if [[ $(whoami) == "$WORK_USERNAME" ]]; then
+        pass_file=".password_apollo"
+    fi
 
-alias scp='sshpass -f ~/.password_apollo scp'            # Requires 'sshpass'
+    # Search for the password file in "$HOME" or "$SSHHOME"
+    pass_file=$(find "$HOME" --maxdepth 1 -name "$pass_file" 2>/dev/null)
+    if [[ -z $pass_file ]]; then
+        pass_file=$(find "$SSHHOME" -name "$pass_file" 2>/dev/null)
+        if [[ -z $pass_file ]]; then
+            echo "Error: Password file $pass_file not found!"
+            return 1
+        fi
+    fi
+
+    command_to_run="sshpass -f $pass_file $command_to_run"
+
+    echo "$command_to_run $@"
+    $command_to_run "$@"
+}
+
+complete -F _ssh ssh
 
 ## SSH and SCP using user 'admin'
 function ssha() {
@@ -62,7 +75,6 @@ function ssha() {
 
     sshpass -f "$pass_file" \ssh admin@"$1"
 }
-alias scpa='sshpass -f $SSHHOME/.sshrc.d/.password_apollo_admin scp -O -o User=admin'     # Requires 'sshpass'
 
 ## SSH and SCP using user 'harmonic'
 function sshh() {
@@ -70,6 +82,8 @@ function sshh() {
 }
 complete -F _ssh sshh
 
+alias scp='sshpass -f ~/.password_apollo scp'            # Requires 'sshpass'
+alias scpa='sshpass -f $SSHHOME/.sshrc.d/.password_apollo_admin scp -O -o User=admin'     # Requires 'sshpass'
 alias scph='sshpass -f ~/.password_harmonic scp -O -o User=harmonic'     # Requires 'sshpass'
 ##############################################
 
@@ -77,8 +91,21 @@ alias scph='sshpass -f ~/.password_harmonic scp -O -o User=harmonic'     # Requi
 ##############  Human Readable  ##############
 alias du='du -h'
 alias df='df -h'
-alias free='free -h'
+alias free='free -ht'
 alias speedtest='speedtest --bytes'
+
+# Show progress bar for dd command
+alias dd='dd status=progress'
+
+# turn mount output to better looking and human readable
+alias mounts='mount | column -t'
+
+alias path='echo -e ${PATH//:/\\n}'
+
+
+# Show system load in readable format
+alias load='uptime -p; uptime | grep -oP "average: \K[0-9.]+" | xargs -I{} echo "Load: {}"'
+
 ##############################################
 
 
@@ -103,10 +130,22 @@ alias obs-backup='obs-encrypt && mv /tmp/my_vault.tar.gz.enc $HOME/Dropbox/Apps/
 
 ##############      Network     ##############
 alias ping='ping -c 4'
+alias pingap='ping 192.168.8.4'
+alias pingdns='ping adguard'
 alias pingg='ping www.google.com'
 
 # Execute wget with resume option
 alias wget='wget -c'
+alias ext_ip='wget -q -O - http://icanhazip.com/ | tail'
+
+# nmap formatter, requires 'xmlstarlet' package
+alias nmap_formatter="xmlstarlet sel -t -m '/nmaprun/host[status/@state=\"up\"]' -v 'address[@addrtype=\"ipv4\"]/@addr' -o $'\t' -v 'address[@addrtype=\"mac\"]/@addr' -o $'\t' --if 'address[@addrtype=\"mac\"]/@vendor' -v 'address[@addrtype=\"mac\"]/@vendor' -o $'\t' -b --if 'hostnames/hostname[1]' -v 'hostnames/hostname[1]/@name' -b -n"
+
+# nmap shortcuts for home networks scanning
+alias nmap='sudo nmap'
+local_network_address=$(ip -o -4 addr list | awk '{print $4}' | cut -d/ -f1 | grep "192.168" | awk -F. '{print $1"."$2"."$3".0/24"}')
+alias nmap_home='nmap -sn "$local_network_address" -oX - | nmap_formatter'
+
 ##############################################
 
 
@@ -115,25 +154,60 @@ alias wget='wget -c'
 alias reboot='sudo reboot'
 alias shutdown='sudo shutdown now'
 alias find='sudo find'
+alias podman='sudo podman '
+
+alias please='sudo !!'
+##############################################
+
+
+#############   Package Managers  ############
+#################   Pacman  ##################
+alias pacman='sudo pacman '
+alias pacup='pacman -Syyu'
+alias pacser='pacman -Ss'
+alias pacinst='pacman -S'
+alias pacuninst='pacman -Rns'
+alias pacorphans='pacman -Qtdq'
+alias pacdelorphans='pacman -Rns $(pacman -Qtdq)'
+alias pacclean='pacman -Sc'
+alias paccleanall='pacman -Scc'
+
+alias pacdiff='sudo pacdiff '
+
+
+###################   Apt  ###################
 alias apt='sudo apt'
-alias aptup='sudo apt update; clear; apt list --upgradable; read -p "Upgrade now? [y/n]  " input; [ ${input^^} == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."'
+alias aptup='apt update; clear; apt list --upgradable; read -p "Upgrade now? [y/n]  " input; [ ${input^^} == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."'
+alias aptser='apt search'
+alias aptinst='apt install'
+alias aptuninst='apt remove'
+alias aptorphans='apt autoremove'
+alias aptpurge='apt remove --purge'
+alias aptclean='apt clean'
+alias aptcleanall='apt autoclean'
+##############################################
+
+
+#################   Podman  ##################
+alias pps='podman ps'
+alias ppsa='podman ps -a'
+alias ppod='podman pod list'
+alias prmi='podman rmi'
 ##############################################
 
 
 ######   Interactive File Interaction   ######
+# Do not delete / or prompt if deleting more than 3 files at a time
+alias rm='rm -I --preserve-root'
+# Confirmations
 alias mv='mv -i'
 alias cp='cp -i'
-alias rm='rm -i'
-##############################################
-
-
-##################    Git   ##################
-alias gits='git status'
-alias dch='dch -Dunstable --urgency=low'
+alias ln='ln -i'
 ##############################################
 
 
 ##########    Debian Build system   ##########
+alias dch='dch -Dunstable --urgency=low'
 SCHROOT_PI="pi37"
 alias build='nsg-schroot-run $SCHROOT_PI-apollo -- dpkg-buildpackage -us -uc -b -j4'
 alias buildd='nsg-schroot build-deps $SCHROOT_PI-apollo . && build'
@@ -149,10 +223,17 @@ alias cd..='cd ..'
 alias cd...='cd ../..'
 
 alias cdg='cd ~/git_repositories/"$1"'
-alias cdm='cd ~/git_repositories/swpkg/ulc-mulpi'
-alias cdr='cd ~/git_repositories/swpkg-rpd'
-alias cdipdr='cd ~/git_repositories/swpkg/cosm-ipdr-exporter'
-alias cdalg='cd ~/git_repositories/swpkg/cos-algorithms'
+
+if [[ $WORK_USERNAME = $USER ]]; then
+    local_git_repositories="$HOME/git_repositories/swpkg"
+elif [[ $REMOTE_SETUP_USERNAME = $USER ]]; then
+    local_git_repositories="$HOME/git_repos"
+fi
+
+alias cdipdr='cd $local_git_repositories/cosm-ipdr-exporter'
+alias cdalg='cd $local_git_repositories/cos-algorithms'
+alias cdm='cd $local_git_repositories/ulc-mulpi'
+alias cdr='cd $local_git_repositories/swpkg-rpd'
 ##############################################
 
 
@@ -174,10 +255,17 @@ alias bal='$EDITOR ~/.bash_aliases && reload'
 alias bfn='$EDITOR ~/.bash_functions && reload'
 alias sshc='$EDITOR ~/.ssh/config'
 
-alias xclip='xclip -selection c'
+# If xclip is installed, use it to copy to clipboard
+if command -v xclip &> /dev/null; then
+    alias xclip='xclip -selection c'
+elif command -v wl-copy &> /dev/null; then
+    alias xclip='wl-copy'
+fi
 
 alias j='jobs'
 alias h='history'
+
+alias psg='ps aux|head -1 ; ps aux| grep -v "grep" | grep -i '
 
 # Create parent directories if needed
 alias mkdir='mkdir -pv'
@@ -198,14 +286,15 @@ alias today='date +%A, %B %-d %Y'
 
 ##############################################
 
-# Disk Space usage
+# Disk Space usage for partitions, excluding tmpfs and devtmpfs
 alias usage='df -hlT --exclude-type=tmpfs --exclude-type=devtmpfs'
+# Top 10 largest files in current directory
 alias most='du -hsx * | sort -rh | head -10'
+# List files larger than 20MB in current directory
 alias big_files='find . -type f -size +20M -exec ls -lh {} \; 2> /dev/null | awk { print \t( ,, )\t } | sort -hrk 1'
 
 # Auto clear vivaldi corupted datafiles
 alias vivaldi-empty-cache='\rm -r "$(du -hsx $HOME/.config/vivaldi/Default/Service\ Worker/* | sort -rh | head -n1 | cut -f2)"'
-#du -hsx $HOME/.config/vivaldi/Default/Service\ Worker/* | sort -rh | head -n1 | cut -f2 | rm -r'
 
 # Joplin update
 alias joplinup='wget -O - https://raw.githubusercontent.com/laurent22/joplin/dev/Joplin_install_and_update.sh | bash'
@@ -216,6 +305,5 @@ alias zq='set-konsole-tab-title Zellij; zellij --layout $HOME/.config/zellij/lay
 alias zel='set-konsole-tab-title Zellij; zellij' 
 
 # VPN Actions
-alias vpc_old='set-konsole-tab-title VPN; sudo openfortivpn -u $WORK_EMAIL --otp=1 --persistent=15 --config /etc/openfortivpn/config.old --trusted-cert 2b0e1b56aa3d156eb02d55defb3a2b8e46089c84c2cd8240b923dee3ed4f5d3e'
 alias vpc='set-konsole-tab-title VPN; cd /etc/openfortivpn; clear; sudo openfortivpn --persistent=15 --config /etc/openfortivpn/config'
 alias vpk="sudo $HOME/.local/bin/kill-vpn"
