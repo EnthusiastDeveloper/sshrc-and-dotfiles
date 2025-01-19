@@ -30,7 +30,7 @@
     fo = fetch origin
     fp = fetch --prune
     ############
-    l = log --graph --branches --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
+    l = log --graph --branches --remotes --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
     lb = !git log --graph --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s' main..$(git rev-parse --abbrev-ref HEAD)
     reflog = reflog --date=format:'%Y-%m-%d %H:%M'
     ############
@@ -96,8 +96,6 @@
     untracked = cyan
 [color "decorate"]
     tag = blue
-[help]
-	autocorrect = 30
 [core]
     whitespace = -trailing-space
 [diff]
@@ -106,16 +104,19 @@
     textconv = unzip -v
 [difftool "vscode"]
     cmd = code --wait --diff $LOCAL $REMOTE
+[help]
+	autocorrect = 20
+[init]
+    defaultBranch = main
 [log]
     decorate = true
-[rerere]
-    enabled = true
 [merge]
     # tool = kdiff3
     tool = vscode
 [mergetool "vscode"]
     cmd = code --wait $MERGED
-[init]
-    defaultBranch = main
 [pull]
 	rebase = false
+[rerere]
+    enabled = true
+    autoupdate = true

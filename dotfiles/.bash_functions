@@ -1,24 +1,16 @@
 #!/bin/bash
 
 
-RED="$(tput setaf 1)"
-GREEN="$(tput setaf 2)"
-YELLOW="$(tput setaf 3)"
-BLUE="$(tput setaf 4)"
-MAGENTA="$(tput setaf 5)"
-CYAN="$(tput setaf 6)"
-WHITE="$(tput setaf 7)"
-BOLD="$(tput bold)"
-NO_COLOR="$(tput sgr0)"
-
-function nyan() {
+nyan() {
+    # Colors are defined in .bashrc
     echo
-    echo -e "${RED}-_-_-_-_-_-_-_${NO_COLOR}${BOLD}${WHITE},------,${NO_COLOR}"
-    echo -e "${YELLOW}_-_-_-_-_-_-_-${NO_COLOR}${BOLD}${WHITE}|   /\_/\\${NO_COLOR}"
-    echo -e "${GREEN}-_-_-_-_-_-_-${NO_COLOR}${BOLD}${WHITE}~|__( ^ .^)${NO_COLOR}"
-    echo -e "${CYAN}-_-_-_-_-_-_-_${NO_COLOR}${BOLD}${WHITE}"'""  ""'"$NO_COLOR"
-    echo
+    echo -e "${_RED}-_-_-_-_-_-_-_${_WHITE},------,"
+    echo -e "${_ORANGE}_-_-_-_-_-_-_-${_WHITE}|   /\_/\\"
+    echo -e "${_GREEN}-_-_-_-_-_-_-${_WHITE}~|__( ^ .^)"
+    echo -e "${_CYAN}-_-_-_-_-_-_-_${_WHITE}"'""  ""'
+    echo -e "${_NO_COLOR}"
 }
+
 
 mykillall ()
 {
@@ -38,9 +30,18 @@ function up() {
 }
 
 # Show the battery status of BT devices
-alias mouse_bat='_show_bat_info "mouse_dev"'
 alias logi_k380_bat='_show_bat_info "battery_hid_f4o73o35o88ob1odb_battery"'
 alias k380_bat='logi_k380_bat'
+
+mouse_bat() {
+    if [ -f /sys/class/power_supply/hid-f4:73:35:88*-battery ]; then
+        # For JOMAA trackball mouse
+        _show_bat_info "mouse_dev"
+    elif [ -f /sys/class/power_supply/hidpp_battery_0 ]; then
+        # For Logitech MX Master 3
+        _show_bat_info "hidpp_battery_0"
+    fi
+}
 
 ## Requires upower package to be installed
 function _show_bat_info()
@@ -136,7 +137,30 @@ function extract() {
             *.tbz2) tar xjf "$fullpath" ;;
             *.tgz) tar xzf "$fullpath" ;;
             *.txz) tar Jxvf "$fullpath" ;;
-            *.zip) unzip "$fullpath" ;;
+            *.zip)
+                if ! command -v unzip &> /dev/null; then
+                    echo "'unzip' is not installed, please install it first"
+                    return 1
+                else
+                    unzip "$fullpath"
+                fi
+                ;;
+            *.7z)
+                if ! command -v 7z &> /dev/null; then
+                    echo "'7z' is not installed, please install it first"
+                    return 1
+                else
+                    7z x "$fullpath"
+                fi
+                ;;
+            *.rar)
+                if ! command -v unrar &> /dev/null; then
+                    echo "'unrar' is not installed, please install it first"
+                    return 1
+                else
+                    unrar x "$fullpath"
+                fi
+                ;;
             *) echo "'$1' cannot be extracted via ${FUNCNAME[0]}" && cd .. && ! $didfolderexist && rm -r "$foldername" ;;
         esac
     else
@@ -275,15 +299,6 @@ search_logging_library() {
         fi
 
         local logging_lib=""
-        
-        # Search for import statements related to logging
-        # if grep -R -E "foundation.logger" --include="*.py" "$full_path" >/dev/null 2>&1; then
-        #     logging_lib="foundation"
-        # elif grep -R -E "^import\s+(logging|log)" --include="*.py" "$full_path" >/dev/null 2>&1; then
-        #     logging_lib="logging (standard library)"
-        # else
-        #     logging_lib="No common logging library found"
-        # fi
 
         if grep "python3-foundation" "$controlfile" > /dev/null 2>&1; then
             logging_lib="nsg-foundation"
@@ -333,4 +348,42 @@ function addYakuakeQuadSession {
     elif [[ "$1" == hvs* ]]; then
         qdbus org.kde.yakuake /yakuake/tabs org.kde.yakuake.setTabTitle "$SESSION_ID" "$1"
     fi
+}
+
+
+############################ PS1 Helper ############################
+
+## Color grid for testing colors, using ANSI escape codes
+## These colors are used in the PS1 variable, configured in .bashrc
+colorgrid() {
+    iter=16
+    while [ $iter -lt 52 ]
+    do
+        second=$[$iter+36]
+        third=$[$second+36]
+        four=$[$third+36]
+        five=$[$four+36]
+        six=$[$five+36]
+        seven=$[$six+36]
+        if [ $seven -gt 250 ];then seven=$[$seven-251]; fi
+
+        echo -en "\033[38;5;$(echo $iter)m█ "
+        printf "%03d" $iter
+        echo -en "   \033[38;5;$(echo $second)m█ "
+        printf "%03d" $second
+        echo -en "   \033[38;5;$(echo $third)m█ "
+        printf "%03d" $third
+        echo -en "   \033[38;5;$(echo $four)m█ "
+        printf "%03d" $four
+        echo -en "   \033[38;5;$(echo $five)m█ "
+        printf "%03d" $five
+        echo -en "   \033[38;5;$(echo $six)m█ "
+        printf "%03d" $six
+        echo -en "   \033[38;5;$(echo $seven)m█ "
+        printf "%03d" $seven
+
+        iter=$[$iter+1]
+        printf '\r\n'
+    done
+    echo -e "\033[0m"
 }
