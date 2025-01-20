@@ -38,9 +38,9 @@ function ssh() {
     fi
 
     # Search for the password file in "$HOME" or "$SSHHOME"
-    pass_file=$(find "$HOME" --maxdepth 1 -name "$pass_file" 2>/dev/null)
+    pass_file=$($(which find) "$HOME" -maxdepth 1 -name "$pass_file" 2>/dev/null)
     if [[ -z $pass_file ]]; then
-        pass_file=$(find "$SSHHOME" -name "$pass_file" 2>/dev/null)
+        pass_file=$($(which find) "$SSHHOME" -name "$pass_file" 2>/dev/null)
         if [[ -z $pass_file ]]; then
             echo "Error: Password file $pass_file not found!"
             return 1
@@ -222,7 +222,6 @@ alias ...='cd ../..'
 alias cd..='cd ..'
 alias cd...='cd ../..'
 
-alias cdg='cd ~/git_repositories/"$1"'
 
 if [[ $WORK_USERNAME = $USER ]]; then
     local_git_repositories="$HOME/git_repositories/swpkg"
@@ -230,6 +229,7 @@ elif [[ $REMOTE_SETUP_USERNAME = $USER ]]; then
     local_git_repositories="$HOME/git_repos"
 fi
 
+alias cdg='cd $local_git_repositories/"$1"'
 alias cdipdr='cd $local_git_repositories/cosm-ipdr-exporter'
 alias cdalg='cd $local_git_repositories/cos-algorithms'
 alias cdm='cd $local_git_repositories/ulc-mulpi'

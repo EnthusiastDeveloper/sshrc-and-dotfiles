@@ -4,11 +4,11 @@
 nyan() {
     # Colors are defined in .bashrc
     echo
-    echo -e "${_RED}-_-_-_-_-_-_-_${_WHITE},------,"
-    echo -e "${_ORANGE}_-_-_-_-_-_-_-${_WHITE}|   /\_/\\"
-    echo -e "${_GREEN}-_-_-_-_-_-_-${_WHITE}~|__( ^ .^)"
-    echo -e "${_CYAN}-_-_-_-_-_-_-_${_WHITE}"'""  ""'
-    echo -e "${_NO_COLOR}"
+    echo -e "${_RED}-_-_-_-_-_-_-_${_BOLD}${_WHITE},------,${_RESET}"
+    echo -e "${_ORANGE}_-_-_-_-_-_-_-${_BOLD}${_WHITE}|   /\_/\\${_RESET}"
+    echo -e "${_GREEN}-_-_-_-_-_-_-${_BOLD}${_WHITE}~|__( ^ .^)${_RESET}"
+    echo -e "${_CYAN}-_-_-_-_-_-_-_${_BOLD}${_WHITE}"'""  ""'"${_RESET}"
+    echo -e "${_RESET}"
 }
 
 
@@ -165,6 +165,17 @@ function extract() {
         esac
     else
         echo "'$1' is not a valid file"
+    fi
+}
+
+function wireshark() {
+    if command -v wireshark &> /dev/null; then
+        wireshark "$@"
+    elif [[ -f "$HOME/git_repositories/wireshark-harmonic/run/wireshark" ]]; then
+        $HOME/git_repositories/wireshark-harmonic/run/wireshark "$@"
+    else
+        echo "Error: Couldn't find wireshark"
+        return 1
     fi
 }
 
