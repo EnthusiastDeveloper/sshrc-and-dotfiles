@@ -154,7 +154,7 @@ function psql-query-log() {
     local query
     query=${*:2}
     # handle Ctrl+C
-    trap 'echo "Stopping psql logging. Output file: $output_file"; exit' INT KILL
+    trap 'echo "Stopping psql logging. Output file: $output_file"; exit' INT
 
     while true; do
         date >> "$output_file"
@@ -172,7 +172,7 @@ function ipdr-log-set() {
 _optional_log_levels() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local log_levels="debug info trace warn error"
-    COMPREPLY=( $(compgen -W "$log_levels" -- "$cur") )
+    mapfile -t COMPREPLY < <(compgen -W "$log_levels" -- "$cur")
 }
 
 complete -F _optional_log_levels ipdr-log-set
@@ -198,21 +198,21 @@ function search_all_k8s_logs() {
     echo "Searching for: $search_string"
     echo "-----------------------------------"
 
-    kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}' | while read namespace pod; do
+    kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}' | while read -r namespace pod; do
         echo "Namespace: $namespace, Pod: $pod"
-        containers=$(kubectl get pod $pod -n $namespace -o jsonpath='{.spec.containers[*].name}')
+        containers=$(kubectl get pod "$pod" -n "$namespace" -o jsonpath='{.spec.containers[*].name}')
         for container in $containers; do
             echo "  Container: $container"
             if $save_logs; then
-                if kubectl logs $pod -n $namespace -c $container 2>/dev/null | $(which grep) -q -i "$search_string"; then
+                if kubectl logs "$pod" -n "$namespace" -c "$container" 2>/dev/null | $(which grep) -q -i "$search_string"; then
                     log_file="${namespace}_${pod}_${container}.log"
                     echo "    Match found. Saving log to $log_file"
-                    kubectl logs $pod -n $namespace -c $container > "$log_file"
+                    kubectl logs "$pod" -n "$namespace" -c "$container" > "$log_file"
                 else
                     echo "    No matches found"
                 fi
             else
-                kubectl logs $pod -n $namespace -c $container 2>/dev/null | $(which grep) -i "$search_string" || echo "    No matches found"
+                kubectl logs "$pod" -n "$namespace" -c "$container" 2>/dev/null | $(which grep) -i "$search_string" || echo "    No matches found"
             fi
         done
         echo "-----------------------------------"

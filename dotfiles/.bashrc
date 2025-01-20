@@ -1,3 +1,5 @@
+#!/bin/bash
+# shellcheck disable=SC1090,SC1091
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
@@ -63,7 +65,7 @@ export EDITOR=vim
 export PAGER=less
 export SHELLCHECK_OPTS='--shell=bash'
 export LC_ALL="en_US.UTF-8"
-export DEBEMAIL='$FULL_NAME <$WORK_EMAIL>'
+export DEBEMAIL="$FULL_NAME <$WORK_EMAIL>"
 #View pacdiff files in sublime text 3
 export DIFFPROG=subl
 
@@ -115,7 +117,7 @@ if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
 
     if [ "$USER" = "root" ]; then
         PS1='\[${_RED}\]\A \[${_RED}${_BOLD}${_REVERSE}\]\u\[${_BLUE}\]@\h\[${_YELLOW}\] \W \[${_GREEN}\]\\$\[${_RESET}\] '
-    elif [ $(command -v git) &> /dev/null ]; then
+    elif command -v git &> /dev/null; then
         for git_prompt_file in \
             "/etc/bash_completion.d/git-prompt" \
             "/usr/share/git/completion/git-prompt.sh" \
@@ -152,7 +154,7 @@ if ! shopt -oq posix; then
 fi
 
 # Enable auto-completion for zellij terminal emulator
-if command -v zellij &> /dev/null; then source <(zellij setup --generate-completion "$(echo $SHELL | awk -F'/' '{print $NF}')"); fi
+if command -v zellij &> /dev/null; then source <(zellij setup --generate-completion "$(echo "$SHELL" | awk -F'/' '{print $NF}')"); fi
 
 # Enable auto-completion for podman
 if command -v podman &> /dev/null; then source <(podman completion bash); fi
@@ -168,31 +170,31 @@ if command -v docker &> /dev/null; then source <(docker completion bash); fi
 
 if [[ $SSHHOME ]]; then
     # This section is executed only when using the 'sshrc' script
-    [ -f $SSHHOME/.sshrc.d/.bash_aliases ] && . $SSHHOME/.sshrc.d/.bash_aliases
-    [ -f $SSHHOME/.sshrc.d/.bash_functions ] && . $SSHHOME/.sshrc.d/.bash_functions
-    [ -f $SSHHOME/.sshrc.d/.bash_usingit_api ] && [ "$USER" == "$REMOTE_SETUP_USERNAME" ] && . $SSHHOME/.sshrc.d/.bash_usingit_api
+    [ -f "$SSHHOME/.sshrc.d/.bash_aliases" ] && . "$SSHHOME/.sshrc.d/.bash_aliases"
+    [ -f "$SSHHOME/.sshrc.d/.bash_functions" ] && . "$SSHHOME/.sshrc.d/.bash_functions"
+    [ -f "$SSHHOME/.sshrc.d/.bash_usingit_api" ] && [ "$USER" == "$REMOTE_SETUP_USERNAME" ] && . "$SSHHOME/.sshrc.d/.bash_usingit_api"
 else
-    [ -f $HOME/.bash_aliases ] && . $HOME/.bash_aliases
-    [ -f $HOME/.bash_functions ] && . $HOME/.bash_functions
-    [ -f $HOME/.zoxide_cd.bash ] && . $HOME/.zoxide_cd.bash
-    [ -f $HOME/.bash_usingit_api ] && [ "$USER" == "$WORK_USERNAME" ] && . $HOME/.bash_usingit_api
+    [ -f "$HOME/.bash_aliases" ] && . "$HOME/.bash_aliases"
+    [ -f "$HOME/.bash_functions" ] && . "$HOME/.bash_functions"
+    [ -f "$HOME/.zoxide_cd.bash" ] && . "$HOME/.zoxide_cd.bash"
+    [ -f "$HOME/.bash_usingit_api" ] && [ "$USER" == "$WORK_USERNAME" ] && . "$HOME/.bash_usingit_api"
 fi
 
 # Source bash_git_functions if git is installed
 if command -v git &>/dev/null; then
-    if [ -f $HOME/.bash_git_functions ]; then
-        . $HOME/.bash_git_functions
-    elif [ -f $SSHHOME/.sshrc.d/.bash_git_functions ]; then
-        . $SSHHOME/.sshrc.d/.bash_git_functions
+    if [ -f "$HOME/.bash_git_functions" ]; then
+        . "$HOME/.bash_git_functions"
+    elif [ -f "$SSHHOME/.sshrc.d/.bash_git_functions" ]; then
+        . "$SSHHOME/.sshrc.d/.bash_git_functions"
     fi
 fi
 
 # Source bash_k8s_functions if kubectl is installed
 if command -v kubectl &>/dev/null; then
-    if [ -f $HOME/.bash_k8s_functions ]; then
-        . $HOME/.bash_k8s_functions
-    elif [ -f $SSHHOME/.sshrc.d/.bash_k8s_functions ]; then
-        . $SSHHOME/.sshrc.d/.bash_k8s_functions
+    if [ -f "$HOME/.bash_k8s_functions" ]; then
+        . "$HOME/.bash_k8s_functions"
+    elif [ -f "$SSHHOME/.sshrc.d/.bash_k8s_functions" ]; then
+        . "$SSHHOME/.sshrc.d/.bash_k8s_functions"
     fi
     # Additionally, enable kubectl bash completion
     source <(kubectl completion bash)
@@ -200,9 +202,9 @@ fi
 
 # Source schroot functions if nsg-schroot is installed
 if command -v nsg-schroot &>/dev/null; then
-    if [ -f $HOME/.bash_schroot_functions ]; then
-        . $HOME/.bash_schroot_functions
-    elif [ -f $SSHHOME/.sshrc.d/.bash_schroot_functions ]; then
-        . $SSHHOME/.sshrc.d/.bash_schroot_functions
+    if [ -f "$HOME/.bash_schroot_functions" ]; then
+        . "$HOME/.bash_schroot_functions"
+    elif [ -f "$SSHHOME/.sshrc.d/.bash_schroot_functions" ]; then
+        . "$SSHHOME/.sshrc.d/.bash_schroot_functions"
     fi
 fi
