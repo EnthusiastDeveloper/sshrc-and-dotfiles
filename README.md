@@ -32,10 +32,27 @@ The repository includes:
 
 ## Installation
 
-1. Clone this repository
-2. Backup your current .bashrc file and any other files you want to keep
-3. Copy the files from the `dotfiles` directory to your home directory (or link them)
-4. Copy the `sshrc` file to a directory in your path, e.g. `$HOME/.local/bin`
+After cloning the repository, pick one of the following options:
+
+#### Option 1: script installation
+
+This is the recommended option. It will:
+- Create hard links for all the files in the `dotfiles` directory
+    - In case of a conflict, it will backup the existing file as `<filename>.backup`
+- Create a symlink for the `sshrc` file to `$HOME/.local/bin/sshrc`
+- Source the new `.bashrc` file in your home directory
+
+```bash
+./scripts/install.sh
+```
+
+#### Option 2: manual installation
+
+1. Backup your current .bashrc file and any other files you want to keep
+2. Copy the files from the `dotfiles` directory to your home directory (or link them)
+3. Copy the `sshrc` file to a directory in your path, e.g. `$HOME/.local/bin`
+4. Source the new `.bashrc` file in your home directory
+
 
 ## Usage
 
