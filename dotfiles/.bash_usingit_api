@@ -31,10 +31,10 @@ get_reservation_time_string() {
     # No need to handle timestamp in "1:30" format
     # If the timestamp is empty, return
     if [ -z "$timestamp" ]; then
-        $timestamp=0
+        timestamp=0
     elif [[ "$timestamp" =~ ^[0-9]+[hH][[:space:]][0-9]+[mM]$ ]]; then
         # If timestamp is in the "1H 30M" format, return it as seconds
-        echo $(convert_timestamp_to_seconds "$timestamp")
+        convert_timestamp_to_seconds "$timestamp"
     fi
 
     echo "$timestamp"
@@ -203,7 +203,7 @@ reserve_setup(){
 	RID=$(echo "$RESPONSE" | jq -r '.reservation_id')
 
 	total_seconds=$(convert_timestamp_to_seconds "$TIME")
-	RESPONSE=$(curl -s -X 'PUT'  'http://usingit-edge.harmonicinc.com/api/update_reservation_settings/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"time": '$total_seconds'}')
+	RESPONSE=$(curl -s -X 'PUT'  'http://usingit-edge.harmonicinc.com/api/update_reservation_settings/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"time": '"$total_seconds"'}')
 	echo -e "\t$GREEN$(echo "$RESPONSE" | jq -r '.detail')$NC\n"
 }
 
@@ -266,7 +266,6 @@ queue_setup() {
     case "$RC" in
         200)
             echo -e "\n\t${GREEN}Successfully reserved ${SETUPNAME^^} setup$NC\n"
-            queue_id=$(echo "$RESPONSE" | jq -r '.queue_id')
             ;;
 		400)
 			echo -e "\n\t${RED}User $USERNAME doesn't exist$NC\n"

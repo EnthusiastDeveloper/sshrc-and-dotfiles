@@ -19,7 +19,8 @@ alias sshb='ssh $BUILDER'
 ## SSH and SCP using user 'dev'
 function ssh() {
     # check if sshrc is installed
-    local command_to_run=$(command -v sshrc >/dev/null 2>&1 && echo "sshrc" || echo "ssh")
+    local command_to_run
+    command_to_run=$(command -v sshrc >/dev/null 2>&1 && echo "sshrc" || echo "ssh")
 
     # Select sshpass file based on argument: '-a' for apollo, '-r' for RPD (user=admin), '-v' for vcmts, '-h' for harmonic
     while getopts 'ahrv' OPTION; do
@@ -49,7 +50,7 @@ function ssh() {
 
     command_to_run="sshpass -f $pass_file $command_to_run"
 
-    echo "$command_to_run $@"
+    echo "$command_to_run" "$@"
     $command_to_run "$@"
 }
 
@@ -73,12 +74,12 @@ function ssha() {
         return 1
     fi
 
-    sshpass -f "$pass_file" \ssh admin@"$1"
+    sshpass -f "$pass_file" "$(which ssh)" admin@"$1"
 }
 
 ## SSH and SCP using user 'harmonic'
 function sshh() {
-    sshpass -f ~/.password_harmonic sshrc $@
+    sshpass -f ~/.password_harmonic sshrc "$@"
 }
 complete -F _ssh sshh
 
@@ -177,7 +178,7 @@ alias pacdiff='sudo pacdiff '
 
 ###################   Apt  ###################
 alias apt='sudo apt'
-alias aptup='apt update; clear; apt list --upgradable; read -p "Upgrade now? [y/n]  " input; [ ${input^^} == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."'
+alias aptup='apt update; clear; apt list --upgradable; read -p "Upgrade now? [y/n]  " input; [ "${input^^}" == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."'
 alias aptser='apt search'
 alias aptinst='apt install'
 alias aptuninst='apt remove'
@@ -211,10 +212,14 @@ alias dch='dch -Dunstable --urgency=low'
 SCHROOT_PI="pi37"
 alias build='nsg-schroot-run $SCHROOT_PI-apollo -- dpkg-buildpackage -us -uc -b -j4'
 alias buildd='nsg-schroot build-deps $SCHROOT_PI-apollo . && build'
-alias nsg-stop-all-sessions='for s in `nsg-schroot list-all | awk '\''{if($1 == "session::") {print $2}}'\''`; do nsg-schroot session-end "$s"; done'
 alias buildexor='nsg-schroot-run exor-$SCHROOT_PI -- dpkg-buildpackage -us -uc -b -aarmhf -j4'
 ##############################################
 
+function nsg-stop-all-sessions() {
+    for s in $(nsg-schroot list-all | awk '{if($1 == "session::") {print $2}}'); do
+        nsg-schroot session-end "$s"
+    done
+}
 
 ##########       Navigations       ###########
 alias ..='cd ..'
@@ -223,17 +228,19 @@ alias cd..='cd ..'
 alias cd...='cd ../..'
 
 
-if [[ $WORK_USERNAME = $USER ]]; then
+if [[ $WORK_USERNAME = "$USER" ]]; then
     local_git_repositories="$HOME/git_repositories/swpkg"
-elif [[ $REMOTE_SETUP_USERNAME = $USER ]]; then
+elif [[ $REMOTE_SETUP_USERNAME = "$USER" ]]; then
     local_git_repositories="$HOME/git_repos"
 fi
 
-alias cdg='cd $local_git_repositories/"$1"'
-alias cdipdr='cd $local_git_repositories/cosm-ipdr-exporter'
-alias cdalg='cd $local_git_repositories/cos-algorithms'
-alias cdm='cd $local_git_repositories/ulc-mulpi'
-alias cdr='cd $local_git_repositories/swpkg-rpd'
+function cdg() {
+    cd "$local_git_repositories/$1" || return 1
+}
+alias cdipdr='cdg cosm-ipdr-exporter'
+alias cdalg='cdg cos-algorithms'
+alias cdm='cdg ulc-mulpi'
+alias cdr='cdg swpkg-rpd'
 ##############################################
 
 
@@ -306,4 +313,4 @@ alias zel='set-konsole-tab-title Zellij; zellij'
 
 # VPN Actions
 alias vpc='set-konsole-tab-title VPN; cd /etc/openfortivpn; clear; sudo openfortivpn --persistent=15 --config /etc/openfortivpn/config'
-alias vpk="sudo $HOME/.local/bin/kill-vpn"
+alias vpk='sudo "$HOME"/.local/bin/kill-vpn'

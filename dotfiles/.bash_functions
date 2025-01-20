@@ -34,7 +34,7 @@ alias logi_k380_bat='_show_bat_info "battery_hid_f4o73o35o88ob1odb_battery"'
 alias k380_bat='logi_k380_bat'
 
 mouse_bat() {
-    if [ -f /sys/class/power_supply/hid-f4:73:35:88*-battery ]; then
+    if compgen -G "/sys/class/power_supply/hid-f4:73:35:88*-battery" > /dev/null; then
         # For JOMAA trackball mouse
         _show_bat_info "mouse_dev"
     elif [ -f /sys/class/power_supply/hidpp_battery_0 ]; then
@@ -172,7 +172,7 @@ function wireshark() {
     if command -v wireshark &> /dev/null; then
         wireshark "$@"
     elif [[ -f "$HOME/git_repositories/wireshark-harmonic/run/wireshark" ]]; then
-        $HOME/git_repositories/wireshark-harmonic/run/wireshark "$@"
+        "$HOME"/git_repositories/wireshark-harmonic/run/wireshark "$@"
     else
         echo "Error: Couldn't find wireshark"
         return 1
@@ -187,7 +187,7 @@ function log-combine() {
         echo "[debug] Processing $log"
         OUTPUT_FILE="$log.log.combined"
         ## Find all matching files
-        FILES="$($(which ls) $log* | $(which grep) gz | sort -r)"
+        FILES="$($(which ls) "$log*" | $(which grep) gz | sort -r)"
         echo "[debug] Files: $FILES"
         ## Concatenate all files into a single file
         for file in $FILES; do
@@ -370,30 +370,30 @@ colorgrid() {
     iter=16
     while [ $iter -lt 52 ]
     do
-        second=$[$iter+36]
-        third=$[$second+36]
-        four=$[$third+36]
-        five=$[$four+36]
-        six=$[$five+36]
-        seven=$[$six+36]
-        if [ $seven -gt 250 ];then seven=$[$seven-251]; fi
+        second=$(( iter+36 ))
+        third=$(( second+36 ))
+        four=$(( third+36 ))
+        five=$(( four+36 ))
+        six=$(( five+36 ))
+        seven=$(( six+36 ))
+        if [ $seven -gt 250 ];then seven=$(( seven-251 )); fi
 
-        echo -en "\033[38;5;$(echo $iter)m█ "
+        echo -en "\033[38;5;$iter)m█ "
         printf "%03d" $iter
-        echo -en "   \033[38;5;$(echo $second)m█ "
+        echo -en "   \033[38;5;$second)m█ "
         printf "%03d" $second
-        echo -en "   \033[38;5;$(echo $third)m█ "
+        echo -en "   \033[38;5;$third)m█ "
         printf "%03d" $third
-        echo -en "   \033[38;5;$(echo $four)m█ "
+        echo -en "   \033[38;5;$four)m█ "
         printf "%03d" $four
-        echo -en "   \033[38;5;$(echo $five)m█ "
+        echo -en "   \033[38;5;$five)m█ "
         printf "%03d" $five
-        echo -en "   \033[38;5;$(echo $six)m█ "
+        echo -en "   \033[38;5;$six)m█ "
         printf "%03d" $six
-        echo -en "   \033[38;5;$(echo $seven)m█ "
+        echo -en "   \033[38;5;$seven)m█ "
         printf "%03d" $seven
 
-        iter=$[$iter+1]
+        iter=$(( iter+1 ))
         printf '\r\n'
     done
     echo -e "\033[0m"
