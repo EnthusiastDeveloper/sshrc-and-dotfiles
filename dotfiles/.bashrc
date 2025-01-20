@@ -132,11 +132,11 @@ if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
         unset GIT_PS1_SHOWUNTRACKEDFILES
         export GIT_PS1_SHOWUPSTREAM='auto'
 
-        PS1='${debian_chroot:+($debian_chroot)}\[${_RED}\][\$?] \[${_LIGHT_BLUE}\]\A \
+        PS1='${debian_chroot:+($debian_chroot)}\[${_RED}\][$?] \[${_LIGHT_BLUE}\]\A \
 \[${_GREEN}\]\u\[${_LIGHT_GRAY}\]@\[${_GREEN_BOLD}\]\h \
 \[${_CYAN_INVERTED}\]\W\[${_RESET}\]\[${_ORANGE}\]$(__git_ps1 " (%s)") \[${_PURPLE}\]\\$\[${_RESET}\] '
     else
-        PS1='${debian_chroot:+($debian_chroot)}\[${_RED}\][\$?] \[${_LIGHT_BLUE}\]\A \
+        PS1='${debian_chroot:+($debian_chroot)}\[${_RED}\][$?] \[${_LIGHT_BLUE}\]\A \
 \[${_GREEN}\]\u\[${_LIGHT_GRAY}\]@\[${_GREEN_BOLD}\]\h \
 \[${_CYAN_INVERTED}\]\W\[${_RESET}\] \[${_PURPLE}\]\\$\[${_RESET}\] '
     fi
