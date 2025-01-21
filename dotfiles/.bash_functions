@@ -327,6 +327,132 @@ search_logging_library() {
 }
 
 
+## List file types in a directory
+## Usage: list_file_types [/path/to/directory | default: current directory]
+list_file_types() {
+    local dir="${1:-$(pwd)}"
+    
+    # Check if directory exists
+    if [ ! -d "$dir" ]; then
+        echo "Error: Directory '$dir' does not exist"
+        return 1
+    fi
+
+    # Create temporary file to store extensions
+    local tmp_file=$(mktemp)
+    
+    # Find all files recursively and extract unique extensions
+    find "$dir" -type f -not -path '*/\.*' -not -path '*/.git/*' -not -path '*/build/*' -not -path '*/.pybuild/*' -not -path '*/debian/tmp/*' | while read -r file; do
+        # Get file extension, convert to lowercase
+        ext="${file##*.}"
+        ext="${ext,,}"
+
+        # Handle files with or without extension
+        if [ "$ext" = "$file" ]; then
+            # Check for shebang in files without extension
+            first_line=$(head -n 1 "$file" 2>/dev/null)
+            if [[ "$first_line" == *"python"* ]]; then
+                echo "py" >> "$tmp_file"
+            elif [[ "$first_line" == *"bash"* ]] || [[ "$first_line" == *"/sh"* ]]; then
+                echo "sh" >> "$tmp_file"
+            else
+                echo "no_extension" >> "$tmp_file"
+            fi
+        else
+            echo "$ext" >> "$tmp_file"
+        fi
+    done
+
+    # Sort and get unique extensions
+    echo "File types found in directory:"
+    echo "-----------------------------"
+    sort "$tmp_file" | uniq -c | sort -rn | while read -r count ext; do
+        printf "%-20s: %d files\n" "$ext" "$count"
+    done
+
+    echo -e "\n-----------------------------"
+    echo "Total amount of files: $(wc -l < "$tmp_file")"
+
+    # Cleanup
+    rm "$tmp_file"
+}
+
+
+## Count lines of code in a directory
+## Usage: count_code_lines [/path/to/directory | default: current directory]
+count_code_lines() {
+    local dir="${1:-$(pwd)}"
+    
+    # Check if directory exists
+    if [ ! -d "$dir" ]; then
+        echo "Error: Directory '$dir' does not exist"
+        return 1
+    fi
+
+    # Initialize counters for different file types
+    declare -A line_counts
+
+    # Find all files recursively, excluding hidden directories and .git folder
+    while IFS= read -r -d '' file; do
+        # Get file extension
+        # Get file extension, or check for shebang if no extension
+        if [[ "$file" == *"."* ]]; then
+            ext="${file##*.}"
+        else
+            # Check first line for shebang
+            first_line=$(head -n 1 "$file")
+            if [[ "$first_line" == *"python"* ]]; then
+                ext="py"
+            elif [[ "$first_line" == *"bash"* ]] || [[ "$first_line" == *"/sh"* ]]; then
+                ext="sh"
+            else
+                # Skip files with no extension and no recognizable shebang
+                continue
+            fi
+        fi
+        
+        # Count non-empty, non-comment lines based on file type
+        case "$ext" in
+            py)
+                # Python files: ignore # comments, ''' and """ blocks, and empty lines
+                count=$(sed '/^[[:space:]]*"""/,/"""/d' "$file" | sed "/^[[:space:]]*'''/,/'''/d" | grep -v '^\s*#' | grep -v '^\s*$' -c)
+                ;;
+            sh|bash)
+                # Shell scripts: ignore # comments and empty lines
+                count=$(grep -v '^\s*#' "$file" | grep -v '^\s*$' -c)
+                ;;
+            c|cpp|h|hpp|java)
+                # C/C++/Java: ignore // and /* */ comments and empty lines
+                count=$(sed 's|//.*||g' "$file" | sed '/\/\*/,/\*\//d' | grep -v '^\s*$' -c)
+                ;;
+            sql)
+                # SQL files: ignore -- comments and empty lines
+                count=$(grep -v '^\s*--' "$file" | grep -v '^\s*$' -c)
+                ;;
+            *)
+                # Skip files with unknown extensions
+                continue
+                ;;
+        esac
+
+        # echo "File: $file, Type: $ext, Lines: $count"
+        # Add to total for this file type
+        line_counts["$ext"]=$((${line_counts["$ext"]:-0} + count))
+    done < <(find "$dir" -type f -not -path '*/\.*' -not -path '*/.git/*' -not -path '*/build/*' -not -path '*/.pybuild/*' -not -path '*/debian/tmp/*' -not -path '*/debian/build/*' -print0)
+
+    # Print results
+    echo "Lines of code by language:"
+    echo "-------------------------"
+    local total=0
+    for ext in "${!line_counts[@]}"; do
+        printf "%-10s: %d\n" "$ext" "${line_counts[$ext]}"
+        total=$((total + ${line_counts[$ext]}))
+    done
+    echo "-------------------------"
+    echo "Total      : $total"
+}
+
+
 ############################# Konsole #############################
 set-konsole-tab-title-type ()
 {
