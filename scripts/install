@@ -136,9 +136,11 @@ _backup_and_link() {
                 prompt+=$'\nChoice [O/k/b]: '
                 read -r -p "$prompt" user_choice
                 # Convert the user choice to lowercase or default choice of 'keep' if user input is empty
-                action="${user_choice,,:-$DEFAULT_BACKUP_MODE}"
+                action="${user_choice:=$DEFAULT_BACKUP_MODE}"
+                action="${action,,}"
                 ;;
         esac
+        
         _handle_existing_file "$target" "$action" || return
     fi
 
@@ -211,7 +213,8 @@ _install_sshrc() {
             backup|keep|overwrite) action="${MODE_ACTIONS[$ARG_MODE]}" ;;
             *)
                 read -r -p "File $sshrc_target already exists. [O]verwrite, [k]eep, [b]ackup? " user_choice
-                action="${user_choice,,:-$DEFAULT_BACKUP_MODE}"
+                action="${user_choice:=$DEFAULT_BACKUP_MODE}"
+                action="${action,,}"
                 ;;
         esac
         _handle_existing_file "$sshrc_target" "${action}" || return
