@@ -293,6 +293,48 @@ function maint() {
 }
 
 
+## Find all git repositories that depends on a given package
+## Usage: find-depends-on <package-name>
+find-depends-on() {
+    if [ $# -lt 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <package-name>"
+        return 1
+    fi
+
+    function _get_control_file() {
+        local package="$1"
+        local control_file
+        control_file="$package/debian/control"
+        if [ ! -f "$control_file" ]; then
+            # Search for a control file with ".apollo" or ".bookworm" suffixes but without "force-modern-deps". Prefer 'apollo' over 'bookworm'
+            control_file=$(find "$package/debian" -name "control*" | grep -E "apollo|bookworm" | grep -v "force-modern-deps" | sort | head -n 1)
+        fi
+        echo "$control_file"
+    }
+
+    repositories=()
+    user_input="${1%/}"
+    packages="$user_input"
+    # Get all packages built from the given reposotiry
+    if [ -d "$packages" ]; then
+        control_file=$(_get_control_file "$packages")
+        packages=$(awk '/^Package:/ {print $2}' < "$control_file")
+    fi
+
+    for package in $packages; do
+        # Iterate over all folders in the current directory and search for repositories that depend on the given package
+        for folder in */; do
+            local controlfile=$(_get_control_file "$folder")
+            if [ -f "$controlfile" ] && grep -q "$package" "$controlfile"; then
+                repositories+=("${folder%/}")
+            fi
+        done
+    done
+    output=$(printf "%s\n" "${repositories[@]}" | sort -u | grep -v "$user_input" | grep -ve 'apollo-.*release')
+    [ -n "$output" ] && echo -e "$output" || echo "No repositories are dependent on \"$user_input\""
+}
+
+
 ############################# Logging #############################
 search_logging_library() {
     local parent_dir="$HOME/git_repositories/swpkg"

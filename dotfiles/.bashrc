@@ -196,8 +196,6 @@ if command -v kubectl &>/dev/null; then
     elif [ -f "$SSHHOME/.sshrc.d/.bash_k8s_functions" ]; then
         . "$SSHHOME/.sshrc.d/.bash_k8s_functions"
     fi
-    # Additionally, enable kubectl bash completion
-    source <(kubectl completion bash)
 fi
 
 # Source schroot functions if nsg-schroot is installed
