@@ -30,7 +30,7 @@
     fo = fetch origin
     fp = fetch --prune
     ############
-    l = log --graph --branches --remotes --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
+    l = log --graph --branches --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
     lb = !git log --graph --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s' main..$(git rev-parse --abbrev-ref HEAD)
     reflog = reflog --date=format:'%Y-%m-%d %H:%M'
     ############
@@ -46,7 +46,7 @@
     psf = push --force-with-lease
     ############
     ra = rebase --abort
-    rbi = rebase -i main
+    rbim = rebase -i main
     rc = "!git au && git rebase --continue"  # stage modifications and continue the rebase
     ############
     remotes = remote -v

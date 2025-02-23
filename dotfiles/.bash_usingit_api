@@ -208,7 +208,7 @@ reserve_setup(){
 }
 
 queue_setup() {
-    if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]];then
+    if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]]; then
 		return 0
 	fi
 
