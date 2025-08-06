@@ -5,7 +5,7 @@
 #############################################################
 
 # Enable kubectl bash completion
-source <(kubectl completion bash)
+source <(kubectl completion $(basename ${SHELL}))
 
 k() {
     eval 'kubectl $*'
@@ -90,7 +90,7 @@ to-exec() {
     if [ -z "$3" ]; then cmd="/bin/bash"; else cmd=${*:3}; fi
     if [ -n "$2" ]; then container="-c $2" ; else container=""; fi
 
-    eval k exec -it "$1" "$container" -- "${cmd}"
+    eval kubectl exec -it "$1" "$container" -- "${cmd}"
 }
 
 
@@ -127,25 +127,54 @@ function kl() {
     if [ -n "$3" ]; then args=${*:3}; else args=""; fi
     if [ -n "$2" ]; then container="-c $2"; else container=""; fi
 
-    eval k logs "$1" "$container" --timestamps "${args}"
+    eval kubectl logs "$1" "$container" --timestamps "${args}"
 }
 
 complete -F _complete_pod_and_container kl
 
-alias to-confd='k exec vcmts-m-0 -itc confd -- bash'
-alias to-ipdr='k exec vcmts-m-0 -itc ipdr -- bash'
-alias to-psql='k exec -it postgresql-0 -- psql odb odb_user'
-alias psql-query='k exec -i postgresql-0 -- psql odb odb_user -c'
+alias to-confd='kubectl exec vcmts-m-0 -itc confd -- bash'
+alias to-ipdr='kubectl exec vcmts-m-0 -itc ipdr -- bash'
+
+## Version 3 of the to-psql function
+## This function allows to execute psql commands in the postgresql container of the vCMTS
+## If no arguments are passed, it starts an interactive psql session.
+## If a query is passed, it executes the query and returns the result.
+## If the '-w' or '--watch' flag is passed - it executes the query every second and displays the result.
+## '-h' or '--help' flag displays the usage information.
+function to-psql() {
+    if [ $# -eq 0 ]; then
+        kubectl exec -it postgresql-0 -c postgresql -- psql odb odb_user
+    else
+        # if '-w' or '--watch' is passed, start watch-psql
+        if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+            echo "Usage: ${FUNCNAME[0]} [-w|--watch] <query>"
+            echo "If '-w' or '--watch' is passed, the query will be executed repeatedly every second."
+            return
+        fi
+        if [[ "$1" == "-w" || "$1" == "--watch" ]]; then
+            shift  # Remove the watch flag
+            if [ $# -eq 0 ]; then
+                echo "Usage: ${FUNCNAME[0]} --watch <query>"
+                return
+            fi
+            watch -n1 "kubectl exec -i postgresql-0 -c postgresql -- psql odb odb_user -c \"$@\""
+        else
+            kubectl exec -i postgresql-0 -c postgresql -- psql odb odb_user -c "$@;"
+        fi
+    fi
+}
 
 ########### CLI related aliases ###########
 function to-cli() {
     if [ $# -eq 0 ]; then
-        k exec vcmts-m-0 -itc confd -- su admin
+        kubectl exec vcmts-m-0 -itc confd -- su admin
     else
         # Run the provided command in the confd container in non-interactive mode
-        echo "$@" | k exec vcmts-m-0 -ic confd -- su admin
+        echo "$@" | kubectl exec vcmts-m-0 -ic confd -- su admin
     fi
 }
+alias to-lci='to-cli'
+alias to-clid='kubectl exec vcmts-m-0 -itc confd -- su debug'
 
 alias scm='to-cli scm'
 alias cms='scm'
@@ -157,10 +186,10 @@ alias showver=corever
 
 function to-snmp  {
     if [ $# -eq 0 ]; then
-        k exec vcmts-m-0 -itc snmp -- bash
+        kubectl exec vcmts-m-0 -itc snmp -- bash
     else
-        mgmt_ip=$(k exec vcmts-m-0 -itc snmp -- ip a s mgmt | awk '/inet / {print $2}' | cut -d/ -f1)
-        echo "$@" | k exec vcmts-m-0 -ic snmp -- snmpwalk -v 2c -c public "$mgmt_ip" "$@"
+        mgmt_ip=$(kubectl exec vcmts-m-0 -itc snmp -- ip a s mgmt | awk '/inet / {print $2}' | cut -d/ -f1)
+        echo "$@" | kubectl exec vcmts-m-0 -ic snmp -- snmpwalk -v 2c -c public "$mgmt_ip" "$@"
     fi
 }
 
@@ -183,10 +212,9 @@ function psql-query-log() {
     done
 }
 
-# alias ipdr-log-set='k exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*"'
 function ipdr-log-set() {
     local log_level="${1:-info}"
-    k exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*" "$log_level"
+    kubectl exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*" "$log_level"
 }
 
 alias ipdr-log-get='kubectl exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 ShowCategory ".*"'
@@ -199,7 +227,7 @@ _optional_log_levels() {
 
 complete -F _optional_log_levels ipdr-log-set
 
-alias ipdr-log='k logs vcmts-m-0 -c ipdr --timestamps '
+alias ipdr-log='kubectl logs vcmts-m-0 -c ipdr --timestamps '
 
 
 # Iterate over all pods and containers and search for a given string in the logs
@@ -246,9 +274,14 @@ function search_all_k8s_logs() {
 # Start an interactive bash session inside mulpi container. Pod number is passed with argument.
 function to-mulpi() {
     if [ -z "$1" ]; then
-        command="k exec -itc mulpi vcmts-cd-0-0 -- bash"
+        # Get the active pod name
+        first_cluter_status=$(echo "show cluster status" | kubectl exec vcmts-m-0 -ic confd -- su admin | grep -m1 "CMTS LCCE")
+        lcce_num=$(echo "$first_cluter_status" | awk '{print $3}')
+        active_pod=$(echo "$first_cluter_status" | awk '{print $6}')
+        command="kubectl exec -itc mulpi $active_pod -- bash"
+        echo "Entering active pod of LCCE $lcce_num: $active_pod"
     else
-        command="k exec $1 -itc mulpi -- bash"
+        command="kubectl exec $1 -itc mulpi -- bash"
     fi
 
     echo "Executing $command"
@@ -266,9 +299,9 @@ complete -F _cd_pods to-mulpi
 # Start an interactive bash session inside a snooping container based on passed pod
 function to-snooping() {
     if [ -z "$1" ]; then
-        command="k exec vcmts-m-0 -itc snooping -- bash"
+        command="kubectl exec vcmts-m-0 -itc snooping -- bash"
     else
-        command="k exec $1 -itc snooping -- bash"
+        command="kubectl exec $1 -itc snooping -- bash"
     fi
 
     echo "Executing $command"
