@@ -4,6 +4,7 @@
 ## This script provides functions to interact with git repositories ##
 ######################################################################
 
+CURRENT_PI_VERSION="PI44"
 
 # Switch to side-branch based on partial string of its name
 function git-chb() {
@@ -215,9 +216,9 @@ function git-mass-clone {
             echo "Usage: git-mass-clone <input_file>"
             return 1
         fi
+    else
+        filename="$1"
     fi
-
-    filename="$1"
 
     if [ ! -f "$filename" ]; then
         echo "Error: File not found - $filename."
@@ -250,4 +251,259 @@ function git-mass-clone {
         echo .
     done < "$filename"
     return
+}
+
+# Update repositories based on a passed flag ('core', 'platform', 'all')
+function git-update-repositories {
+    local flag
+    local config_file
+    local logfile
+    local errors_counter
+
+    # Validate input
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <core|platform|all>"
+        return 1
+    fi
+
+    flag="$1"
+    logfile="/tmp/${FUNCNAME[0]}.log"
+    truncate -s 0 "$logfile"
+    errors_counter=0
+
+    case "$flag" in
+        core)
+            config_file="$HOME/git_repositories/swpkg/apollo-release/svnardeb-config/conf"
+            ;;
+        platform)
+            config_file="$HOME/git_repositories/swpkg/apollo-platform-release/svnardeb-config/conf"
+            ;;
+        all)
+            git-update-repositories core
+            git-update-repositories platform
+            return
+            ;;
+        *)
+            echo "Error: Invalid flag '$flag'. Use 'core', 'platform', or 'all'."
+            return 1
+            ;;
+    esac
+
+    # Update the 'apollo-release' or 'apollo-platform-release' repository first
+    repo_dir=""
+    if [[ "$flag" == "core" ]]; then
+        repo_dir="apollo-release"
+    elif [[ "$flag" == "platform" ]]; then
+        repo_dir="apollo-platform-release"
+    fi
+
+    if [ -d "$HOME/git_repositories/swpkg/$repo_dir" ]; then
+        echo "Updating $repo_dir repository..."
+        cd "$HOME/git_repositories/swpkg/$repo_dir" || return 1
+        git checkout release/${CURRENT_PI_VERSION} && git pull || {
+            echo "Error: Failed to update $repo_dir repository." >> "$logfile"
+            ((errors_counter++))
+        }
+        cd - || return 1
+    else
+        echo "Cloning $repo_dir repository..."
+        git clone "ssh://git@bitbucket-cableos.harmonicinc.com:7999/swrel/$repo_dir.git" "$HOME/git_repositories/swpkg/$repo_dir" || {
+            echo "Error: Failed to clone $repo_dir repository." >> "$logfile"
+            ((errors_counter++))
+        }
+    fi
+
+    # Validate config file
+    if [ ! -f "$config_file" ]; then
+        echo "Error: Config file not found - $config_file"
+        return 1
+    fi
+
+    # Iterate over repositories listed in the config file
+    while IFS= read -r line; do
+        # Only operate over lines starting with '<package'
+        if [[ ! "$line" =~ ^[[:space:]]*"<package" ]]; then
+            continue
+        fi
+
+        package_name=$(echo "$line" | awk -F'"' '{print $4}')
+        git_server=$(echo "$line" | awk -F'"' '{print $2}')
+        branch=$(echo "$line" | awk -F'"' '{print $8}')
+
+        # Skip 'apollo-release' and 'apollo-platform-release'
+        if [[ "$package_name" == "apollo-release" || "$package_name" == "apollo-platform-release" ]]; then
+            continue
+        fi
+
+        echo -e "\n\n##### $(basename "$package_name"):"
+        if [ ! -d "$package_name" ]; then
+            echo "Cloning $package_name..."
+            git clone "$git_server/$package_name.git" || {
+                echo "Error: Failed to clone $package_name repository." >> "$logfile"
+                ((errors_counter++))
+            }
+            git -C "$package_name" checkout "$branch" || {
+                echo "Error: Failed to checkout branch $branch in $package_name repository." >> "$logfile"
+                ((errors_counter++))
+            }
+        else
+            echo "Updating $package_name..."
+            cd "$package_name" || return 1
+            git checkout "$branch" && git pull || {
+                echo "Error: Failed to update $package_name repository." >> "$logfile"
+                ((errors_counter++))
+            }
+            cd .. || return 1
+        fi
+    done < "$config_file"
+
+    if [[ $errors_counter -gt 0 ]]; then
+        echo "A total of $errors_counter issues were encountered. See log for details: $logfile"
+    else
+        echo "Repositories updated successfully for flag: $flag"
+    fi
+}
+
+#### GitHub Copilot CLI aliases
+ghcs() {
+	TARGET="shell"
+	local GH_DEBUG="$GH_DEBUG"
+	local GH_HOST="$GH_HOST"
+
+	read -r -d '' __USAGE <<-EOF
+	Wrapper around \`gh copilot suggest\` to suggest a command based on a natural language description of the desired output effort.
+	Supports executing suggested commands if applicable.
+
+	USAGE
+	  $FUNCNAME [flags] <prompt>
+
+	FLAGS
+	  -d, --debug              Enable debugging
+	  -h, --help               Display help usage
+	      --hostname           The GitHub host to use for authentication
+	  -t, --target target      Target for suggestion; must be shell, gh, git
+	                           default: "$TARGET"
+
+	EXAMPLES
+
+	- Guided experience
+	  $ $FUNCNAME
+
+	- Git use cases
+	  $ $FUNCNAME -t git "Undo the most recent local commits"
+	  $ $FUNCNAME -t git "Clean up local branches"
+	  $ $FUNCNAME -t git "Setup LFS for images"
+
+	- Working with the GitHub CLI in the terminal
+	  $ $FUNCNAME -t gh "Create pull request"
+	  $ $FUNCNAME -t gh "List pull requests waiting for my review"
+	  $ $FUNCNAME -t gh "Summarize work I have done in issues and pull requests for promotion"
+
+	- General use cases
+	  $ $FUNCNAME "Kill processes holding onto deleted files"
+	  $ $FUNCNAME "Test whether there are SSL/TLS issues with github.com"
+	  $ $FUNCNAME "Convert SVG to PNG and resize"
+	  $ $FUNCNAME "Convert MOV to animated PNG"
+	EOF
+
+	local OPT OPTARG OPTIND
+	while getopts "dht:-:" OPT; do
+		if [ "$OPT" = "-" ]; then     # long option: reformulate OPT and OPTARG
+			OPT="${OPTARG%%=*}"       # extract long option name
+			OPTARG="${OPTARG#"$OPT"}" # extract long option argument (may be empty)
+			OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+		fi
+
+		case "$OPT" in
+			debug | d)
+				GH_DEBUG=api
+				;;
+
+			help | h)
+				echo "$__USAGE"
+				return 0
+				;;
+
+			hostname)
+				GH_HOST="$OPTARG"
+				;;
+
+			target | t)
+				TARGET="$OPTARG"
+				;;
+		esac
+	done
+
+	# shift so that $@, $1, etc. refer to the non-option arguments
+	shift "$((OPTIND-1))"
+
+	TMPFILE="$(mktemp -t gh-copilotXXXXXX)"
+	trap 'rm -f "$TMPFILE"' EXIT
+	if GH_DEBUG="$GH_DEBUG" GH_HOST="$GH_HOST" gh copilot suggest -t "$TARGET" "$@" --shell-out "$TMPFILE"; then
+		if [ -s "$TMPFILE" ]; then
+			FIXED_CMD="$(cat $TMPFILE)"
+			builtin history -s -- $(builtin history 1 | cut -d' ' -f4-); builtin history -s -- "$FIXED_CMD"
+			echo
+			eval -- "$FIXED_CMD"
+		fi
+	else
+		return 1
+	fi
+}
+
+ghce() {
+	local GH_DEBUG="$GH_DEBUG"
+	local GH_HOST="$GH_HOST"
+
+	read -r -d '' __USAGE <<-EOF
+	Wrapper around \`gh copilot explain\` to explain a given input command in natural language.
+
+	USAGE
+	  $FUNCNAME [flags] <command>
+
+	FLAGS
+	  -d, --debug      Enable debugging
+	  -h, --help       Display help usage
+	      --hostname   The GitHub host to use for authentication
+
+	EXAMPLES
+
+	# View disk usage, sorted by size
+	$ $FUNCNAME 'du -sh | sort -h'
+
+	# View git repository history as text graphical representation
+	$ $FUNCNAME 'git log --oneline --graph --decorate --all'
+
+	# Remove binary objects larger than 50 megabytes from git history
+	$ $FUNCNAME 'bfg --strip-blobs-bigger-than 50M'
+	EOF
+
+	local OPT OPTARG OPTIND
+	while getopts "dh-:" OPT; do
+		if [ "$OPT" = "-" ]; then     # long option: reformulate OPT and OPTARG
+			OPT="${OPTARG%%=*}"       # extract long option name
+			OPTARG="${OPTARG#"$OPT"}" # extract long option argument (may be empty)
+			OPTARG="${OPTARG#=}"      # if long option argument, remove assigning `=`
+		fi
+
+		case "$OPT" in
+			debug | d)
+				GH_DEBUG=api
+				;;
+
+			help | h)
+				echo "$__USAGE"
+				return 0
+				;;
+
+			hostname)
+				GH_HOST="$OPTARG"
+				;;
+		esac
+	done
+
+	# shift so that $@, $1, etc. refer to the non-option arguments
+	shift "$((OPTIND-1))"
+
+	GH_DEBUG="$GH_DEBUG" GH_HOST="$GH_HOST" gh copilot explain "$@"
 }
