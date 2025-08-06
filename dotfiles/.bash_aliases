@@ -22,21 +22,22 @@ function myssh() {
     local command_to_run
     command_to_run=$(command -v sshrc >/dev/null 2>&1 && echo "sshrc" || echo "ssh")
 
-    # Select sshpass file based on argument: '-a' for apollo, '-r' for RPD (user=admin), '-v' for vcmts, '-h' for harmonic
-    while getopts 'ahrv' OPTION; do
-        case $OPTION in
-            a) pass_file=".password_apollo" ;;
-            h) pass_file=".password_harmonic" ;;
-            r) pass_file=".password_apollo_admin" ;;
-            v) pass_file=".password_vcmts" ;;
-            ?) echo "Usage: ${FUNCNAME[0]} [-a (apollo) | -r (RPD) | -v (VCMTS) | -h (harmonic)] <hostname>"; return 0 ;;
-        esac
-    done
-
+    local pass_file
     # Set default password file for work accounts
     if [[ $(whoami) == "$WORK_USERNAME" ]]; then
         pass_file=".password_apollo"
     fi
+
+    # Select sshpass file based on argument: '-a' for apollo, '-r' for RPD (user=admin), '-v' for vcmts, '-h' for harmonic
+    while getopts 'ahrv' OPTION; do
+        case $OPTION in
+            a) pass_file=".password_apollo"         && shift $((OPTIND - 1)) ;;
+            h) pass_file=".password_harmonic"       && shift $((OPTIND - 1)) ;;
+            r) pass_file=".password_apollo_admin"   && shift $((OPTIND - 1)) ;;
+            v) pass_file=".password_vcmts"          && shift $((OPTIND - 1)) ;;
+            ?) echo "Usage: ${FUNCNAME[0]} [-a (apollo) | -r (RPD) | -v (VCMTS) | -h (harmonic)] <hostname>"; return 0 ;;
+        esac
+    done
 
     # Search for the password file in "$HOME" or "$SSHHOME"
     pass_file=$($(which find) "$HOME" -maxdepth 1 -name "$pass_file" 2>/dev/null)
@@ -49,7 +50,6 @@ function myssh() {
     fi
 
     command_to_run="sshpass -f $pass_file $command_to_run"
-
     echo "$command_to_run" "$@"
     $command_to_run "$@"
 }
@@ -180,7 +180,18 @@ alias pacdiff='sudo pacdiff '
 
 ###################   Apt  ###################
 alias apt='sudo apt'
-alias aptup='apt update; clear; apt list --upgradable; read -p "Upgrade now? [y/n]  " input; [ "${input^^}" == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."'
+function aptup() {
+    apt update; clear
+    # num_upgradable=$(apt list --upgradable 2> /dev/null | grep -c upgradable)
+    if [ "$(apt list --upgradable 2> /dev/null | grep -c upgradable)" -eq 0 ]; then
+        echo "apt says: no packages to upgrade."
+        return 0
+    fi
+    echo "Packages to upgrade:"
+    apt list --upgradable
+    read -rp "Upgrade now? [y/n]  " input
+    [ "${input^^}" == "Y" ] && sudo apt-get -y upgrade || echo "OK, bye."
+}
 alias aptser='apt search'
 alias aptinst='apt install'
 alias aptuninst='apt remove'
@@ -245,19 +256,29 @@ alias cd..='cd ..'
 alias cd...='cd ../..'
 
 
-if [[ $WORK_USERNAME = "$USER" ]]; then
-    local_git_repositories="$HOME/git_repositories/swpkg"
-elif [[ $REMOTE_SETUP_USERNAME = "$USER" ]]; then
-    local_git_repositories="$HOME/git_repos"
+if [ -d "$HOME/git_repositories/swpkg" ]; then
+    git_dir="$HOME/git_repositories/swpkg"
+elif [ -d "$HOME/git_repos" ]; then
+    git_dir="$HOME/git_repos"
+elif [ -d "$HOME/development" ]; then
+    git_dir="$HOME/development"
 fi
 
 function cdg() {
-    cd "$local_git_repositories/$1" || return 1
+    cd "$git_dir/$1" || return 1
 }
 alias cdipdr='cdg cosm-ipdr-exporter'
 alias cdalg='cdg cos-algorithms'
 alias cdm='cdg ulc-mulpi'
 alias cdr='cdg swpkg-rpd'
+## Get the latest version of the package out of the changelog
+function pkgver() {
+    if [[ ! -d "debian" ]]; then
+        echo "Error: This function is meant to be called from a root directory of a debian package."
+        return 1
+    fi
+    head -1 debian/changelog | awk '{print $2}' | sed 's/)//;s/(//'
+}
 ##############################################
 
 
@@ -281,7 +302,7 @@ alias sshc='$EDITOR ~/.ssh/config'
 
 # If xclip is installed, use it to copy to clipboard
 if command -v xclip &> /dev/null; then
-    alias xclip='xclip -selection c'
+    alias xclip='xclip -selection c -rmlastnl'
 elif command -v wl-copy &> /dev/null; then
     alias xclip='wl-copy'
 fi
@@ -306,7 +327,7 @@ alias mkdir='mkdir -pv'
 #	-s -> Enable alternate speller
 alias nano='nano -AFScilm -s "aspell -c -x" --tabsize=4'
 
-alias today='date +%A, %B %-d %Y'
+alias today='date "+%A, %B %-d %Y"'
 
 ##############################################
 
