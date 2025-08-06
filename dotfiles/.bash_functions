@@ -169,44 +169,14 @@ function extract() {
 }
 
 function wireshark() {
-    if command -v wireshark &> /dev/null; then
+    if [[ -f "$HOME/git_repositories/wireshark/run/wireshark" ]]; then
+        "$HOME"/git_repositories/wireshark/run/wireshark "$@"
+    elif command -v wireshark &> /dev/null; then
         wireshark "$@"
-    elif [[ -f "$HOME/git_repositories/wireshark-harmonic/run/wireshark" ]]; then
-        "$HOME"/git_repositories/wireshark-harmonic/run/wireshark "$@"
     else
         echo "Error: Couldn't find wireshark"
         return 1
     fi
-}
-
-## This script finds all matching logs produced by log-rotate and concatenates them into a single file
-## It then deletes the origianl files and compresses the new file
-function log-combine() {
-    LOGS="$($(which find) . -type f -name "*.log.1.gz" -printf '%P\n' | $(which awk) -F. '{print $1}')"
-    for log in $LOGS; do
-        echo "[debug] Processing $log"
-        OUTPUT_FILE="$log.log.combined"
-        ## Find all matching files
-        FILES="$($(which ls) "$log*" | $(which grep) gz | sort -r)"
-        echo "[debug] Files: $FILES"
-        ## Concatenate all files into a single file
-        for file in $FILES; do
-            zcat "$file" >> "$OUTPUT_FILE"
-            $(which rm) "$file"
-        done
-        cat "$log.log" >> "$OUTPUT_FILE"
-        $(which rm) "$log.log"
-
-        ## Compress the new file
-        tar -czf "$OUTPUT_FILE".tar.gz "$OUTPUT_FILE"
-        $(which rm) "$OUTPUT_FILE"
-    done
-}
-
-function log-trim() {
-    [[ -z $1 ]] && echo -e "Usage: ${FUNCNAME[0]} <path-to-log-file>" && return
-    sed -Ei.bak --quiet 's/^.*T([0-9:]+\.[0-9]{5}).*Severity": "([A-Z]+)", "Package": "([[:alpha:]_-]+).*File": "\.\.\/\.\.\/(.*)", "Line": "([0-9]+)", (.*)/\1 \2 \3 \4:\5 \6/p' "$1"
-    sed -i 's/\\n/\n/g' "$1"
 }
 
 function word-count() {
@@ -292,6 +262,40 @@ function maint() {
     fi
 }
 
+# Get the binary packages compiled from a given folder. If no folder is given, use the current directory.
+# Example usage: binpkg <dir1> <dir2> .. - will show info for each argument
+#                ls -d cosm-* | binpkg - will show info for each given data
+#                binpkg - will show info for current directory
+function binpkg() {
+    local path
+
+    function getBinPkg() {
+        [[ "$2" -eq 1 ]] && echo "-- $1"
+        res=""
+        for file in "$1/debian/control"*; do
+            output=$(awk '/^Package:/ {print $2}' "$file")
+            res="$res$output\n"
+        done
+
+        echo -e "$res" | awk '!seen[$0]++ && NF'
+    }
+
+    # Read input from argument
+    if [ $# -gt 0 ]; then
+        with_dir=$(($# > 1))
+        for arg in "$@"; do
+            getBinPkg "$arg" $with_dir
+        done
+    # Use current directory if no input given from pipe
+    elif [ -t 0 ]; then
+        getBinPkg "$(pwd)"
+    else
+        # Iterate over pipe input and execute for each line
+        while read -r path; do
+            getBinPkg "$path" "1"
+        done
+    fi
+}
 
 ## Find all git repositories that depends on a given package
 ## Usage: find-depends-on <package-name>
@@ -335,7 +339,38 @@ find-depends-on() {
 }
 
 
-############################# Logging #############################
+############################# Log Manipulation #############################
+
+## This script finds all matching logs produced by log-rotate and concatenates them into a single file
+## It then deletes the origianl files and compresses the new file
+function log-combine() {
+    LOGS="$($(which find) . -type f -name "*.log.1.gz" -printf '%P\n' | $(which awk) -F. '{print $1}')"
+    for log in $LOGS; do
+        echo "[debug] Processing $log"
+        OUTPUT_FILE="$log.log.combined"
+        ## Find all matching files
+        FILES="$($(which ls) "$log*" | $(which grep) gz | sort -r)"
+        echo "[debug] Files: $FILES"
+        ## Concatenate all files into a single file
+        for file in $FILES; do
+            zcat "$file" >> "$OUTPUT_FILE"
+            $(which rm) "$file"
+        done
+        cat "$log.log" >> "$OUTPUT_FILE"
+        $(which rm) "$log.log"
+
+        ## Compress the new file
+        tar -czf "$OUTPUT_FILE".tar.gz "$OUTPUT_FILE"
+        $(which rm) "$OUTPUT_FILE"
+    done
+}
+
+function log-trim() {
+    [[ -z $1 ]] && echo -e "Usage: ${FUNCNAME[0]} <path-to-log-file>" && return
+    sed -Ei.bak --quiet 's/^.*T([0-9:]+\.[0-9]{5}).*Severity": "([A-Z]+)", "Package": "([[:alpha:]_-]+).*File": "\.\.\/\.\.\/(.*)", "Line": "([0-9]+)", (.*)/\1 \2 \3 \4:\5 \6/p' "$1"
+    sed -i 's/\\n/\n/g' "$1"
+}
+
 search_logging_library() {
     local parent_dir="$HOME/git_repositories/swpkg"
     local folders_filename="apollo.pi37.packages.2024.09.03.conf"
@@ -368,6 +403,44 @@ search_logging_library() {
     done
 }
 
+
+## Find all pairs of IPDR SESSION start and stop events in a log file. Useful for finding session duration.
+## Usage: ipdr_find_session_event_pairs <log_file>
+ipdr_find_session_event_pairs() {
+    log_file=$1
+    local tempfile
+    tempfile=$(mktemp)
+
+    # Extract session start and stop events, including the line numbers
+    grep -E 'sending SESSION_(START|STOP)' "$log_file" > "$tempfile"
+
+    # Read each stop event and find its matching start event
+    while read -r data; do
+        # Test if the event is a stop event
+        if [[ $data != *"SESSION_STOP"* ]]; then
+            continue
+        fi
+        # Extract sessionId and connection_number from the stop event
+        session_id=$(echo "$data" | sed -n 's/.*sessionId=\([0-9]*\).*/\1/p')
+        connection_number=$(echo "$data" | grep -oP '"Logger": "\K[^"]+')
+
+        # Scan backward in the events.txt file to find the matching start event
+        matching_start_events=$(grep -E "$connection_number.*SESSION_START.*sessionId=$session_id" "$tempfile")
+
+        # unite the stop event with the matching start events, sort them and print the stop event with the previous start event
+        event_pair=$(echo -e "$data\n$matching_start_events" | sort | grep -B1 "SESSION_STOP")
+        # if the event pair does not include the start event, skip it
+        if [[ $(echo "$event_pair" | grep -c "sending SESSION_") -lt 2 ]]; then
+            continue
+        fi
+        echo -e "$event_pair\n"
+    done < "$tempfile"
+
+    rm "$tempfile"
+}
+
+
+############################# Coding Metadata #############################
 
 ## List file types in a directory
 ## Usage: list_file_types [/path/to/directory | default: current directory]
