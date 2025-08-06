@@ -344,11 +344,7 @@ alias vivaldi-empty-cache='\rm -r "$(du -hsx $HOME/.config/vivaldi/Default/Servi
 # Joplin update
 alias joplinup='wget -O - https://raw.githubusercontent.com/laurent22/joplin/dev/Joplin_install_and_update.sh | bash'
 
-# Zellij terminal (require installing - https://zellij.dev/
-alias z='set-konsole-tab-title Zellij; zellij' 
-alias zq='set-konsole-tab-title Zellij; zellij --layout $HOME/.config/zellij/layouts/quad.kdl' 
-alias zel='set-konsole-tab-title Zellij; zellij' 
 
-# VPN Actions
+##################  VPN Functions  ##################
 alias vpc='set-konsole-tab-title VPN; cd /etc/openfortivpn; clear; sudo openfortivpn --persistent=15 --config /etc/openfortivpn/config'
 alias vpk='sudo "$HOME"/.local/bin/kill-vpn'

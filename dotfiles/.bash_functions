@@ -603,6 +603,110 @@ function addYakuakeQuadSession {
 }
 
 
+#################### Zellij terminal related functions ####################
+## Zellij  can be installed from https://zellij.dev/
+
+if command -v zellij &> /dev/null; then
+
+    # Enable kubectl bash completion
+    source <(zellij setup --generate-completion $(basename ${SHELL}))
+
+    alias zels="zellij list-sessions"
+
+    _zellij_exited_sessions() {
+        latest="${COMP_WORDS[$COMP_CWORD]}"
+        output=$(zellij list-sessions -n | grep "EXITED" | awk '{print $1}')
+        mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+    }
+
+    ## Create a new zellij session with the given title or attach to an existing one if it exists
+    function z() {
+        local title
+        if [[ $# -eq 0 ]]; then
+            zellij
+        else
+            title=$1
+            set-konsole-tab-title "$title"
+            # Try to attach to an existing session. '-c' flag creates a new session if it doesn't exist
+            zellij attach -c "$title"
+        fi
+    }
+    complete -F _zellij_exited_sessions z
+
+
+    ## Completion function for to-exec
+    _complete_pod_and_container() {
+        _init_completion || return
+
+        case "$cword" in 
+            1)
+                # Completing the first argument - pod name
+                local layouts
+                layouts=$(kp | awk '/^[^NAME]/ {print $1}')
+                mapfile -t COMPREPLY < <(compgen -W "$layouts" -- "${COMP_WORDS[COMP_CWORD]}")
+                ;;
+            2) 
+                # Completing the second argument - container name without the -c flag
+                local containers
+                containers=$(kpc "${COMP_WORDS[1]}")
+                mapfile -t COMPREPLY < <(compgen -W "$containers" -- "${COMP_WORDS[COMP_CWORD]}")
+                ;;
+            *)
+                COMPREPLY=()
+                ;;
+        esac
+    }
+
+    _complete_zellij_layouts() {
+        latest="${COMP_WORDS[$COMP_CWORD]}"
+        output=$(for item in "$HOME/.config/zellij/layouts"/*; do basename "${item%.*}"; done)
+        mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+    }
+
+    ## Create a new zellij session with the given layout and title
+    function zl() {
+        local title
+        local layout
+        if [[ $# -eq 2 ]]; then
+            layout="$1"
+            title="$2"
+        elif [[ $# -eq 1 ]]; then
+            layout=${1:-default}
+            title="${layout^^}"
+        else
+        echo -e "Usage: ${FUNCNAME[0]} <layout> [title] "; exit 1
+        fi
+        set-konsole-tab-title "$title"
+        zellij --layout "$layout" attach -c "$title"
+    }
+    complete -F _complete_zellij_layouts zl
+
+    alias zvpn='zl "$HOME/.config/zellij/layouts/vpn_inkkey.kdl" VPN'
+
+    ## Create a new quad-pane zellij session with the given title
+    function zq() {
+        zl "$HOME/.config/zellij/layouts/quad.kdl" "$1"
+    }
+
+    ## Delete a given zellij session or all exited sessions if no session name is provided
+    ## Usage: zeld [session_name]
+    function zeld() {
+        if [[ $# -eq 0 ]]; then
+            # Delete all exited sessions
+            while read -r session_name; do
+                zellij delete-session "$session_name" 1>/dev/null 2>&1
+            done <<< "$(_zellij_exited_sessions)"
+        else
+            zellij delete-session "$1"
+        fi
+    }
+    complete -F _zellij_exited_sessions zeld
+    complete -F _zellij_exited_sessions "zellij delete-session"
+    complete -F _zellij_exited_sessions "zellij d"
+fi
+
+
+
 ############################ PS1 Helper ############################
 
 ## Color grid for testing colors, using ANSI escape codes
