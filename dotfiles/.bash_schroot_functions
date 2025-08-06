@@ -2,7 +2,7 @@
 
 ##############  Schroot related functions  ##############
 
-current_pi="PI41"
+current_pi="pi44"
 default_schroot="$current_pi-apollo"
 log_file="/tmp/buildlog"
 
@@ -107,6 +107,49 @@ builddn()
 }
 complete -F _current_schroots builddn
 
+nsg-schroot-maintain()
+{
+	if [ -z $# ]; then
+		echo "Usage: ${FUNCNAME[0]} <schroot> [create|update]"
+		return 1
+	fi
+
+	schroot="${1:-$default_schroot}"
+	action="${2:-update}"
+
+	echo -e "\n==> Updating release directory for schroot"
+    cur_dir="$(pwd)"
+	#  if hostname starts with "il-edge-builder" - use the builder's release path
+	if [[ "$(hostname)" == "il-edge-builder"* ]]; then
+		release_path="$builder_apollo_release_path"
+	elif [[ "$(hostname)" == "lap1403" ]]; then
+		release_path="$local_apollo_release_path"
+	fi
+
+	cd "$release_path" || return 1
+	git checkout "release/$current_pi"
+	git pull
+	cd "$cur_dir" || return 1
+
+	echo -e "\n==> ${action^} schroot"
+	sudo nsg-schroot "$action" "$schroot" "$release_path"
+	# nsg-schroot set-ccache "$schroot"
+}
+complete -F _current_schroots nsg-schroot-maintain
+
+nsg-schroot-update()
+{
+	# Update a given schroot (or default if non provided)
+	if [ $# -eq 1 ] && [ -n "$1" ]; then
+		schroot="$1"
+	else
+		schroot="${default_schroot}"
+	fi
+
+	nsg-schroot-maintain "$schroot" update
+}
+complete -F _current_schroots nsg-schroot-update
+
 nsg-schroot-recreate()
 {
     # Destroys a given schroot and re-create it
@@ -122,25 +165,9 @@ nsg-schroot-recreate()
     echo "==> Removing old schroot"
     sudo nsg-schroot destroy "$schroot"
 
-    echo -e "\n==> Updating release directory for schroot"
-    cur_dir="$(pwd)"
-	#  if hostname starts with "il-edge-builder" - use the builder's release path
-	if [[ "$(hostname)" == "il-edge-builder"* ]]; then
-		release_path="$builder_apollo_release_path"
-	elif [[ "$(hostname)" == "lap1403" ]]; then
-		release_path="$local_apollo_release_path"
-	fi
-
-	cd "$release_path" || return 1
-	git checkout "release/$current_pi"
-	git pull
-	cd "$cur_dir" || return 1
-
-	echo -e "\n==> Creating new schroot"
-	sudo nsg-schroot create "$schroot" "$release_path"
-	nsg-schroot set-ccache "$schroot"
+	nsg-schroot-maintain "$schroot" create
 }
-complete -F _current_schroots nsg-schroot-recreate 
+complete -F _current_schroots nsg-schroot-recreate
 
 
 ## Fast compilation - can only be executed from inside a schroot
