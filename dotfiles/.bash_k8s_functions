@@ -212,22 +212,157 @@ function psql-query-log() {
     done
 }
 
-function ipdr-log-set() {
-    local log_level="${1:-info}"
-    kubectl exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 SetCategoryPriority ".*" "$log_level"
+
+########### IPDR related aliases ###########
+alias ipdr-logs='kubectl logs vcmts-m-0 -c ipdr --timestamps '
+
+
+IPDR_LOGGERS_CACHE_FILE="/tmp/ipdr_log_completions"
+# Fetches logger names, using a cache to avoid repeated slow kubectl calls.
+# This is intended for use by the completion function.
+_get_cached_ipdr_loggers() {
+    # Cache TTL: 1 day (86400 seconds)
+    local cache_ttl=86400
+
+    # Check if cache is valid
+    if [ -f "$IPDR_LOGGERS_CACHE_FILE" ] && [ "$(($(date +%s) - $(date +%s -r "$IPDR_LOGGERS_CACHE_FILE")))" -lt "$cache_ttl" ]; then
+        cat "$IPDR_LOGGERS_CACHE_FILE"
+        return
+    fi
+
+    # If cache is invalid or doesn't exist, fetch from kubectl
+    # Note: -it flags are omitted for non-interactive scripting.
+    local loggers
+    loggers=$(kubectl exec vcmts-m-0 -c confd -- nsg-logctl -h localhost:23042 ShowCategory ".*" 2>/dev/null | tail -n +3 | awk '{print $1}')
+    
+    if [ -n "$loggers" ]; then
+        echo "$loggers" > "$IPDR_LOGGERS_CACHE_FILE"
+        echo "$loggers"
+    fi
 }
 
-alias ipdr-log-get='kubectl exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 ShowCategory ".*"'
-
-_optional_log_levels() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
+# Bash completion function for the ipdr-log command.
+_ipdr_log_completions() {
+    local cur_word prev_word
+    cur_word="${COMP_WORDS[COMP_CWORD]}"
+    prev_word="${COMP_WORDS[COMP_CWORD-1]}"
+    
     local log_levels="debug info trace warn error"
-    mapfile -t COMPREPLY < <(compgen -W "$log_levels" -- "$cur")
+
+    # Completion for the main command (get|set)
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "get set" -- "${cur_word}") )
+        return 0
+    fi
+
+    local command="${COMP_WORDS[1]}"
+    case "$command" in
+        get)
+            # Completion for 'get' is the list of loggers
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                local loggers
+                loggers=$(_get_cached_ipdr_loggers)
+                COMPREPLY=( $(compgen -W "${loggers}" -- "${cur_word}") )
+            fi
+            ;;
+        set)
+            # Completion for 'set' can be a logger or a log level
+            if [[ ${COMP_CWORD} -eq 2 ]]; then
+                local loggers
+                loggers=$(_get_cached_ipdr_loggers)
+                COMPREPLY=( $(compgen -W "${loggers} ${log_levels}" -- "${cur_word}") )
+            # If the previous word was a logger, complete with log levels.
+            # If the previous word was a log level, no more completions.
+            elif [[ ${COMP_CWORD} -eq 3 ]]; then
+                if [[ " ${log_levels} " =~ " ${prev_word} " ]]; then
+                    COMPREPLY=()
+                else
+                    COMPREPLY=( $(compgen -W "${log_levels}" -- "${cur_word}") )
+                fi
+            fi
+            ;;
+    esac
 }
 
-complete -F _optional_log_levels ipdr-log-set
+_ipdr_log_usage() {
+    echo "Usage: ipdr-log <command> [options]"
+    echo ""
+    echo "A bash tool to interact with IPDR loggers."
+    echo ""
+    echo "Commands:"
+    echo "  get [logger_name]   Get log level for a specific logger or all loggers."
+    echo "  set <options>       Set log level for a logger."
+    echo ""
+    echo "Options for 'set':"
+    echo "  <logger_name> <log_level>  Set a specific logger to a specific level."
+    echo "  <log_level>                Set all loggers ('.*') to a specific level."
+    echo "  <logger_name>              Set a specific logger to the default 'info' level."
+    echo ""
+    echo "Supported log levels: debug, info, trace, warn, error"
+    echo ""
+    echo "Bash completion is available for commands, loggers, and log levels."
+}
 
-alias ipdr-log='kubectl logs vcmts-m-0 -c ipdr --timestamps '
+# The main ipdr-log function.
+ipdr-log() {
+    if [[ $# -eq 0 ]]; then
+        _ipdr_log_usage
+        return 1
+    fi
+
+    local option="$1"
+    shift
+
+    case "$option" in
+        get)
+            local logger_name="${1:-.*}"
+            
+            # Execute the command and store the output
+            local output
+            output=$(kubectl exec vcmts-m-0 -itc confd -- nsg-logctl -h localhost:23042 ShowCategory "$logger_name")
+            
+            # Print the output for the user
+            echo "$output"
+
+            # If we fetched all loggers, update the cache for completion
+            if [ "$logger_name" = ".*" ]; then
+                echo "$output" | tail -n +3 | awk '{print $1}' > "$IPDR_LOGGERS_CACHE_FILE"
+            fi
+            ;;
+        set)
+            local logger_name=".*"
+            local log_level="info"
+            local log_levels="debug info trace warn error"
+
+            if [[ $# -eq 1 ]]; then
+                if [[ " $log_levels " =~ " $1 " ]]; then
+                    log_level="$1"
+                else
+                    logger_name="$1"
+                fi
+            elif [[ $# -gt 1 ]]; then
+                logger_name="$1"
+                log_level="$2"
+            fi
+
+            if [[ ! " $log_levels " =~ " $log_level " ]]; then
+                echo "Error: Invalid log level '$log_level'." >&2
+                echo "Supported levels are: $log_levels" >&2
+                return 1
+            fi
+            
+            # Note: -it flags are omitted for non-interactive scripting.
+            kubectl exec vcmts-m-0 -c confd -- nsg-logctl -h localhost:23042 SetCategoryPriority "$logger_name" "$log_level"
+            ;;
+        *)
+            _ipdr_log_usage
+            return 1
+            ;;
+    esac
+}
+
+# Register the completion function for the ipdr-log command.
+complete -F _ipdr_log_completions ipdr-log
 
 
 # Iterate over all pods and containers and search for a given string in the logs
