@@ -297,11 +297,30 @@ function binpkg() {
     fi
 }
 
+alias pkgbin='binpkg'
+
 ## Find all git repositories that depends on a given package
-## Usage: find-depends-on <package-name>
+## Usage: find-depends-on [--containers] <package-name>
 find-depends-on() {
-    if [ $# -lt 1 ]; then
-        echo "Usage: ${FUNCNAME[0]} <package-name>"
+    local show_containers=false
+    local args=()
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --containers)
+                show_containers=true
+                shift
+                ;;
+            *)
+                args+=("$1")
+                shift
+                ;;
+        esac
+    done
+    
+    if [ ${#args[@]} -lt 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} [--containers] <package-name>"
         return 1
     fi
 
@@ -316,16 +335,55 @@ find-depends-on() {
         echo "$control_file"
     }
 
+    function _find_containers_with_package() {
+        local package="$1"
+        local containers=()
+        local swcont_dir="/home/speled/git_repositories/swcont"
+        
+        if [ -d "$swcont_dir" ]; then
+            for container_dir in "$swcont_dir"/*/; do
+                local container_name=$(basename "$container_dir")
+                local package_list="$container_dir/PackageList"
+                
+                if [ -f "$package_list" ] && grep -q "^$package$" "$package_list"; then
+                    containers+=("$container_name")
+                fi
+            done
+        fi
+        
+        printf "%s\n" "${containers[@]}" | sort -u
+    }
+
     repositories=()
-    user_input="${1%/}"
+    containers=()
+    affected_containers=()
+    user_input="${args[0]%/}"
     packages="$user_input"
-    # Get all packages built from the given reposotiry
+    
+    # Progress indicator function
+    function _show_progress() {
+        local message="$1"
+        echo -n "$message" >&2
+    }
+    
+    function _progress_dot() {
+        echo -n "." >&2
+    }
+    
+    function _clear_progress() {
+        echo >&2
+    }
+    
+    _show_progress "Analyzing dependencies"
+    
+    # Get all packages built from the given repository
     if [ -d "$packages" ]; then
         control_file=$(_get_control_file "$packages")
         packages=$(awk '/^Package:/ {print $2}' < "$control_file")
     fi
 
     for package in $packages; do
+        _progress_dot
         # Iterate over all folders in the current directory and search for repositories that depend on the given package
         for folder in */; do
             local controlfile=$(_get_control_file "$folder")
@@ -333,9 +391,83 @@ find-depends-on() {
                 repositories+=("${folder%/}")
             fi
         done
+        
+        # If --containers flag is set, also find containers that include this package
+        if [ "$show_containers" = true ]; then
+            while IFS= read -r container; do
+                [ -n "$container" ] && containers+=("$container")
+            done < <(_find_containers_with_package "$package")
+        fi
     done
-    output=$(printf "%s\n" "${repositories[@]}" | sort -u | grep -v "$user_input" | grep -ve 'apollo-.*release')
-    [ -n "$output" ] && echo -e "$output" || echo "No repositories are dependent on \"$user_input\""
+    
+    repo_output=$(printf "%s\n" "${repositories[@]}" | sort -u | grep -v "$user_input" | grep -ve 'apollo-.*release')
+    
+    # If --containers flag is set, also find containers that might be affected through dependent packages
+    if [ "$show_containers" = true ]; then
+        _show_progress " checking affected containers"
+        # For each dependent repository, find its packages and check which containers include them
+        for repo in "${repositories[@]}"; do
+            _progress_dot
+            if [[ "$repo" != "$user_input" ]] && [[ "$repo" != apollo-*release ]]; then
+                local dep_control_file=$(_get_control_file "$repo")
+                if [ -f "$dep_control_file" ]; then
+                    local dep_packages=$(awk '/^Package:/ {print $2}' < "$dep_control_file")
+                    for dep_package in $dep_packages; do
+                        while IFS= read -r container; do
+                            [ -n "$container" ] && affected_containers+=("$container")
+                        done < <(_find_containers_with_package "$dep_package")
+                    done
+                fi
+            fi
+        done
+    fi
+    
+    _clear_progress
+    
+    if [ "$show_containers" = true ]; then
+        container_output=$(printf "%s\n" "${containers[@]}" | sort -u)
+        affected_container_output=$(printf "%s\n" "${affected_containers[@]}" | sort -u)
+        
+        # Only show sections that have content
+        if [ -n "$repo_output" ]; then
+            echo "Repositories dependent on \"$user_input\":"
+            echo -e "$repo_output"
+            echo
+        fi
+        
+        if [ -n "$container_output" ]; then
+            echo "Containers that include \"$user_input\":"
+            echo -e "$container_output"
+            echo
+        fi
+        
+        if [ -n "$affected_container_output" ]; then
+            # Remove containers that are already listed in the direct containers list
+            final_affected=$(comm -23 <(echo -e "$affected_container_output" | sort) <(echo -e "$container_output" | sort))
+            if [ -n "$final_affected" ]; then
+                echo "Containers that might also be affected by \"$user_input\":"
+                echo -e "$final_affected"
+                echo
+            fi
+        fi
+        
+        # Show summary message if nothing was found
+        if [ -z "$repo_output" ] && [ -z "$container_output" ] && [ -z "$affected_container_output" ]; then
+            echo "No dependencies or container usage found for \"$user_input\""
+        elif [ -z "$repo_output" ] && [ -z "$container_output" ] && [ -n "$affected_container_output" ]; then
+            # Only affected containers found, but they were duplicates
+            final_affected=$(comm -23 <(echo -e "$affected_container_output" | sort) <(echo -e "$container_output" | sort))
+            if [ -z "$final_affected" ]; then
+                echo "No dependencies or container usage found for \"$user_input\""
+            fi
+        fi
+    else
+        if [ -n "$repo_output" ]; then
+            echo -e "$repo_output"
+        else
+            echo "No repositories are dependent on \"$user_input\""
+        fi
+    fi
 }
 
 

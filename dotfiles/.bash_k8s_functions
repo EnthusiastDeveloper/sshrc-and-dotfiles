@@ -182,7 +182,7 @@ alias rpds='to-cli scr'
 alias clustat='to-cli "show cluster status"'
 alias corever='to-cli "show version"'
 alias showver=corever
-
+alias platver='echo "show version cluster-server" | cli'
 
 function to-snmp  {
     if [ $# -eq 0 ]; then
