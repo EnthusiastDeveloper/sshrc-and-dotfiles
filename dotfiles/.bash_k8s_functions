@@ -70,6 +70,21 @@ ls-pods() {
     done
 }
 
+# Edit the StatefulSet of the given pod
+ests() {
+  pod="${1:-0}"
+  kubectl edit sts $pod ${@:2}
+}
+
+_ests() {
+  latest="${COMP_WORDS[$COMP_CWORD]}"
+  if [ "$COMP_CWORD" == "1" ]; then
+    sts=$(kubectl get sts -o=custom-columns=NAME:.metadata.name | $(which grep) vcmts)
+    COMPREPLY=($(compgen -W "$sts" -- $latest))
+  fi
+}
+complete -F _ests ests
+
 ## List the images used by all containers of a given pod
 get-pods-images() {
     if [ $# -lt 1 ]; then
@@ -87,10 +102,24 @@ to-exec() {
     if [ $# -lt 1 ]; then
         echo "Usage:  ${FUNCNAME[0]} <pod> <container> [cmd]" ; return
     fi
-    if [ -z "$3" ]; then cmd="/bin/bash"; else cmd=${*:3}; fi
-    if [ -n "$2" ]; then container="-c $2" ; else container=""; fi
 
-    eval kubectl exec -it "$1" "$container" -- "${cmd}"
+    local pod="$1"
+    local container_name="$2"
+    shift 2
+    local cmd_args=("$@")
+
+    local container_arg=""
+    if [ -n "$container_name" ]; then
+        container_arg="-c $container_name"
+    fi
+
+    if [ ${#cmd_args[@]} -eq 0 ]; then
+        # No command, start interactive shell
+        kubectl exec -it "$pod" $container_arg -- /bin/bash
+    else
+        # Command is present, execute it
+        kubectl exec -it "$pod" $container_arg -- /bin/bash -c "${cmd_args[*]}"
+    fi
 }
 
 
@@ -119,18 +148,30 @@ _complete_pod_and_container() {
 
 complete -F _complete_pod_and_container to-exec
 
+## Fetch logs from a given pod/container without timestamps
 function kl() {
     if [ $# -lt 1 ]; then
         echo "Usage:  ${FUNCNAME[0]} <pod> <container> [filters]" ; return
     fi
-    local args, container
-    if [ -n "$3" ]; then args=${*:3}; else args=""; fi
-    if [ -n "$2" ]; then container="-c $2"; else container=""; fi
+    local args=()
+    local container_args=()
+    if [ -n "$3" ]; then args=("${@:3}"); fi
+    if [ -n "$2" ]; then container_args=("-c" "$2"); fi
 
-    eval kubectl logs "$1" "$container" --timestamps "${args}"
+    eval kubectl logs "$1" "${container_args[@]}" "${args[@]}"
+}
+
+## Fetch logs from a given pod/container with timestamps
+## This function is similar to kl but adds the --timestamps flag
+function klt() {
+    if [ $# -lt 1 ]; then
+        echo "Usage:  ${FUNCNAME[0]} <pod> <container> [filters]" ; return
+    fi
+    eval kl "$@" --timestamps
 }
 
 complete -F _complete_pod_and_container kl
+complete -F _complete_pod_and_container klt
 
 alias to-confd='kubectl exec vcmts-m-0 -itc confd -- bash'
 alias to-ipdr='kubectl exec vcmts-m-0 -itc ipdr -- bash'
@@ -450,3 +491,98 @@ _snooping_pods() {
 }
 
 complete -F _snooping_pods to-snooping
+
+
+ulc-debug() {
+  if [ -z "$pod" ]; then
+    pod=("$(k get pods -o custom-columns=:metadata.name -lpg --no-headers | head -n1)")
+  fi
+
+  args=""
+
+  while (($#)); do
+    case $1 in
+    -n)
+      shift
+      namespace=$1
+      ;;
+    -p)
+      shift
+      pod=("$1")
+      ;;
+    -a)
+      pod=()
+      for p in $(k get pods -o custom-columns=:metadata.name -lpg --no-headers); do
+        pod+=("$p")
+      done
+      shift
+      ;;
+    *)
+      args="$args $1"
+      shift
+      ;;
+    esac
+  done
+
+  for p in "${pod[@]}"; do
+    echo $p
+    kubectl -it exec -n ${namespace:-default} $p -c mulpi -- ulc-debug $args
+  done
+}
+
+_ulc_debug() {
+  latest="${COMP_WORDS[$COMP_CWORD]}"
+  #echo ${COMP_WORDS[$COMP_CWORD-1]}
+  case "${COMP_WORDS[$COMP_CWORD - 1]}" in
+  "-n")
+    output=$(kubectl get pods -A -lpg --no-headers | awk '{print $1}' | uniq)
+    ;;
+  "-p")
+    namespace=${namespace:-"default"}
+    for i in ${!COMP_WORDS[@]}; do
+      if [[ ${COMP_WORDS[$i]} == "-n" ]]; then
+        namespace=${COMP_WORDS[$i + 1]}
+        break
+      fi
+    done
+    output=$(kubectl get pods -n $namespace -lpg -o custom-columns=NAME:metadata.name --no-headers)
+    ;;
+  *)
+    if [[ -z $pod ]]; then
+      pod=$(kubectl get pods -o custom-columns=:metadata.name -lpg --no-headers | head -n1)
+    fi
+    # rewriting default array which breaks macs because of ':'
+    tmp_words=()
+    for ((i = 0; i < ${#COMP_WORDS[@]}; i++)); do
+      word="${COMP_WORDS[i]}"
+
+      # skip options like -p or --port (and their value)
+      if [[ "$word" == -* ]]; then
+        COMP_CWORD=$((COMP_CWORD - 2)) # adjust COMP_CWORD accordingly
+        ((i++))                        # also skip the value after the option
+        continue
+      fi
+
+      tmp_words+=("$word")
+    done
+    COMP_WORDS=("${tmp_words[@]}")
+
+    mapfile -t COMP_WORDS < <(kubectl exec $pod -c mulpi -- /usr/share/ulc-debug/parser ${COMP_WORDS[*]} $COMP_CWORD)
+    COMP_CWORD=${COMP_WORDS[-1]}
+    unset ${COMP_WORDS[-1]}
+
+    COMPREPLY=$(kubectl exec $pod -c mulpi -- /usr/share/ulc-debug/ulc-debug ${COMP_WORDS[*]})
+
+    if [[ "$COMPREPLY" =~ [A-Za-z]+\(.*\)|.*" ".* ]]; then
+      COMPREPLY=("$COMPREPLY" "")
+    else
+      COMPREPLY=($COMPREPLY)
+    fi
+    return 0
+    ;;
+  esac
+  COMPREPLY=($(compgen -W "$output" -- $latest))
+  unset output
+
+}
+complete -o nosort -F _ulc_debug ulc-debug
