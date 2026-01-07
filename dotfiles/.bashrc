@@ -49,7 +49,7 @@ shopt -s promptvars
 
 
 if [[ -d $HOME/.local/bin ]]; then
-    export PATH="$HOME/.local/bin:$PATH"
+    export PATH="$HOME/.local/bin:$HOME/.npm_global/bin:$PATH"
 fi
 
 # Source .bash_env from either home directory or SSH session directory
@@ -66,6 +66,8 @@ export PAGER=less
 export SHELLCHECK_OPTS='--shell=bash'
 export LC_ALL="en_US.UTF-8"
 export DEBEMAIL="$FULL_NAME <$WORK_EMAIL>"
+
+export NSG_RELEASE_DOCKER_COMMANDS=podman
 #View pacdiff files in sublime text 3
 export DIFFPROG=subl
 
