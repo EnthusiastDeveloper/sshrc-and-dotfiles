@@ -12,6 +12,7 @@
     ############
     cm = commit -m      # commit with a given message
     cma = commit --amend
+    cman = commit --amend --no-edit
     cmad = "!git cma --date=\"$(date -R)\" --no-edit > /dev/null"   # update the commit's date timestamp, do not stop for editting
     ############
     chr = cherry-pick
@@ -23,29 +24,35 @@
     chm = checkout main
     ############
     d = diff
+    ds = diff --staged
+    dmh = diff main HEAD
     dn = diff --name-status # only show the names of modified files
+    dnmh = diff --name-status main HEAD
     dp = diff --no-color    # useful for exporting a diff to a patch file
     ############
     f = fetch
     fo = fetch origin
     fp = fetch --prune
     ############
-    l = log --graph --branches --tags --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
+    l = log --graph --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s'
     lb = !git log --graph --pretty=format:'%C(magenta)%h %C(bold green) %ar %C(blue)<%an> %C(yellow)%d %Creset%s' main..$(git rev-parse --abbrev-ref HEAD)
+    lauth = log --pretty=format:'%h - Author: %an <%ae> | Committer: %cn <%ce> | Date: %cd'
     reflog = reflog --date=format:'%Y-%m-%d %H:%M'
     ############
     patch = "!git --no-pager diff --no-color"  # Create patch file from current changes
     ############
     pl = pull
     plom = pull origin main
-    pb = pull --rebase
-    pbo = pull --rebase origin
+    plro = pull --rebase=interactive origin
+    plrom = pull --rebase=interactive origin main
     ############
     ps = push
     pso = push origin
     psf = push --force-with-lease
     ############
     ra = rebase --abort
+    rb = rebase
+    rbi = rebase -i
     rbim = rebase -i main
     rc = "!git au && git rebase --continue"  # stage modifications and continue the rebase
     ############
@@ -69,6 +76,8 @@
     ac = "!git au && git cm"        # stage modifications and commit
     acm = !"git au && git cm"       # stage modifications and commit
     acma = "!git au && git cma"     # stage modifications and amend to previous commit
+    acman = "!git au && git cman"   # stage modifications and amend to previous commit, without editing the commit message
+    acmad = "!git au && git cmad"   # stage modifications and amend to previous commit, without editing the commit message and updating the commit date
     acp = "!f() { git add -u && git commit -m \"$1\" && git push; }; f"
     acpf = "!git au && git cma --no-edit && git psf"
     #########################################
