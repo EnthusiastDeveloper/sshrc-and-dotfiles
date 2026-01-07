@@ -88,6 +88,22 @@ complete -F _ssh sshh
 alias scp='sshpass -f ~/.password_apollo scp'            # Requires 'sshpass'
 alias scpa='sshpass -f $SSHHOME/.sshrc.d/.password_apollo_admin scp -O -o User=admin'     # Requires 'sshpass'
 alias scph='sshpass -f ~/.password_harmonic scp -O -o User=harmonic'     # Requires 'sshpass'
+
+# Function to get IP addresses of all ipdr-collectors VMs
+function get-ipdr-collectors-ip() {
+    ssh_connection_timeout=5
+
+    # Start all SSH connections in parallel without subshells
+    for i in $(seq 1 11); do
+        result=$(sshh -o ConnectTimeout=$ssh_connection_timeout ipdr-dev-$i -- "ip a" 2>/dev/null | $(which grep) "192\.200" | awk '{print $2}')
+        if [ -n "$result" ]; then
+            echo "ipdr-dev-$i:  $(echo "$result" | cut -d'/' -f1)"
+        else
+            echo "ipdr-dev-$i:  connection failed"
+        fi
+    done
+}
+
 ##############################################
 
 
@@ -238,7 +254,6 @@ function dch() {
     else
         eval "$cmd" "$1"
     fi
-   
     grep -q "Non-maintainer" "debian/changelog" && sed -i '1,6{/Non-maintainer upload/d}' debian/changelog
 }
 ##############################################
