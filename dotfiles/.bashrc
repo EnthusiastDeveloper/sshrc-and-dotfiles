@@ -153,14 +153,14 @@ if ! shopt -oq posix; then
     fi
 fi
 
-# Enable auto-completion for zellij terminal emulator
-if command -v zellij &> /dev/null; then source <(zellij setup --generate-completion "$(echo "$SHELL" | awk -F'/' '{print $NF}')"); fi
-
 # Enable auto-completion for podman
 if command -v podman &> /dev/null; then source <(podman completion bash); fi
 
 # Enable auto-completion for docker
 if command -v docker &> /dev/null; then source <(docker completion bash); fi
+
+# Enable auto-completion for zoxide
+if command -v zoxide &> /dev/null; then source <(zoxide init bash); fi
 
 
 #################################################
@@ -176,7 +176,6 @@ if [[ $SSHHOME ]]; then
 else
     [ -f "$HOME/.bash_aliases" ] && . "$HOME/.bash_aliases"
     [ -f "$HOME/.bash_functions" ] && . "$HOME/.bash_functions"
-    [ -f "$HOME/.zoxide_cd.bash" ] && . "$HOME/.zoxide_cd.bash"
     [ -f "$HOME/.bash_usingit_api" ] && [ "$USER" == "$WORK_USERNAME" ] && . "$HOME/.bash_usingit_api"
 fi
 

@@ -740,7 +740,7 @@ function addYakuakeQuadSession {
 
 if command -v zellij &> /dev/null; then
 
-    # Enable kubectl bash completion
+    # Enable bash completion
     source <(zellij setup --generate-completion $(basename ${SHELL}))
 
     alias zels="zellij list-sessions"
@@ -752,7 +752,7 @@ if command -v zellij &> /dev/null; then
     }
 
     ## Create a new zellij session with the given title or attach to an existing one if it exists
-    function z() {
+    function zel() {
         local title
         if [[ $# -eq 0 ]]; then
             zellij
@@ -763,7 +763,7 @@ if command -v zellij &> /dev/null; then
             zellij attach -c "$title"
         fi
     }
-    complete -F _zellij_exited_sessions z
+    complete -F _zellij_exited_sessions zel
 
 
     ## Completion function for to-exec
@@ -791,7 +791,7 @@ if command -v zellij &> /dev/null; then
 
     _complete_zellij_layouts() {
         latest="${COMP_WORDS[$COMP_CWORD]}"
-        output=$(for item in "$HOME/.config/zellij/layouts"/*; do basename "${item%.*}"; done)
+        output=$(for item in "$HOME/.config/zellij/layout"/*; do basename "${item%.*}"; done)
         mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
     }
 
@@ -799,6 +799,15 @@ if command -v zellij &> /dev/null; then
     function zl() {
         local title
         local layout
+        function usage_and_exit() {
+            echo -e "Usage: ${FUNCNAME[1]} <layout> [title] "
+            echo -e "If title is not provided, it will be set to the uppercase version of the layout name."
+            return 1
+        }
+        # If the first argument is '-h' or '--help', show usage
+        if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+            usage_and_exit
+        fi
         if [[ $# -eq 2 ]]; then
             layout="$1"
             title="$2"
@@ -806,7 +815,7 @@ if command -v zellij &> /dev/null; then
             layout=${1:-default}
             title="${layout^^}"
         else
-        echo -e "Usage: ${FUNCNAME[0]} <layout> [title] "; exit 1
+            usage_and_exit
         fi
         set-konsole-tab-title "$title"
         zellij --layout "$layout" attach -c "$title"
@@ -817,7 +826,7 @@ if command -v zellij &> /dev/null; then
 
     ## Create a new quad-pane zellij session with the given title
     function zq() {
-        zl "$HOME/.config/zellij/layouts/quad.kdl" "$1"
+        zl "$HOME/.config/zellij/layout/quad.kdl" "$1"
     }
 
     ## Delete a given zellij session or all exited sessions if no session name is provided
