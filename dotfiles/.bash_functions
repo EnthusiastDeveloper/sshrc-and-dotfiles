@@ -473,6 +473,152 @@ find-depends-on() {
 
 ############################# Log Manipulation #############################
 
+# trim_mulpi_log - Trim MULPI container logs for better readability
+# 
+# This function processes MULPI log files to:
+#   - Reduce timestamp precision (4 decimal places instead of 9)
+#   - Show container role and version once at the top
+#   - Shorten severity levels (DEBUG->DBG, INFO->INF, etc.)
+#   - Remove redundant fields (Package, Role, Severity, Version from each line)
+#   - Convert escaped newlines (\n) to actual newlines
+#
+# Usage: trim_mulpi_log <input.log>
+# Output: Creates trimmed_<input.log> in the same directory
+#
+# Performance: ~200ms for 40K lines using awk
+# Requirements: awk (standard), pv (optional, for progress bar)
+#
+trim_mulpi_log() {
+    local input_file="$1"
+    
+    # Validate input
+    if [[ -z "$input_file" ]]; then
+        echo "Usage: trim_mulpi_log <filename.log>"
+        return 1
+    fi
+    
+    if [[ ! -f "$input_file" ]]; then
+        echo "Error: File '$input_file' not found"
+        return 1
+    fi
+    
+    # Prepare output file path
+    local dir=$(dirname "$input_file")
+    local base=$(basename "$input_file")
+    local output_file="${dir}/trimmed_${base}"
+    
+    echo "Processing $input_file..."
+    
+    # Extract metadata from first line to display in header
+    local first_line=$(head -n 1 "$input_file")
+    local initial_role=$(echo "$first_line" | grep -oP '"Role": "\K[^"]+')
+    local version=$(echo "$first_line" | grep -oP '"Version" : "\K[^"]+')
+    
+    # Write header with container role and version
+    {
+        echo "################################################################################"
+        echo "### CONTAINER ROLE: ${initial_role^^}"
+        echo "### VERSION: $version"
+        echo "################################################################################"
+        echo ""
+    } > "$output_file"
+    
+    # Define AWK script as heredoc to avoid code duplication
+    # This script is used both with and without pv progress indicator
+    read -r -d '' awk_script <<'AWK_EOF' || true
+BEGIN {
+    # Map full severity names to 3-letter abbreviations
+    sev["TRACE"] = "TRC"
+    sev["DEBUG"] = "DBG"
+    sev["INFO"] = "INF"
+    sev["WARN"] = "WRN"
+    sev["WARNING"] = "WRN"
+    sev["ERROR"] = "ERR"
+    sev["FATAL"] = "FTL"
+}
+{
+    # Show progress every 1000 lines (only when total is known)
+    if (total > 0 && NR % 1000 == 0) {
+        percent = int((NR / total) * 100)
+        printf "Progress: %d%% (%d/%d lines)\r", percent, NR, total > "/dev/stderr"
+    }
+    
+    # Extract container role from JSON
+    # Uses RSTART/RLENGTH from match() for POSIX compatibility
+    if (match($0, /"Role": "([^"]+)"/)) {
+        current_role = substr($0, RSTART+9, RLENGTH-10)
+    }
+    
+    # Detect and mark role changes (e.g., failover from active to standby)
+    if (current_role != prev_role && current_role != "") {
+        print ""
+        print "################################################################################"
+        print "### ROLE CHANGED: " prev_role " -> " toupper(current_role)
+        print "################################################################################"
+        print ""
+        prev_role = current_role
+    }
+    
+    # Extract timestamp and trim to 4 decimal places (e.g., 2026-02-12T19:05:35.8589Z)
+    if (match($0, /^[^.]+\.[0-9]{4}/)) {
+        timestamp = substr($0, RSTART, RLENGTH) "Z"
+    }
+    
+    # Extract severity and convert to short form
+    if (match($0, /"Severity": "([^"]+)"/)) {
+        sev_val = substr($0, RSTART+13, RLENGTH-14)
+        severity = sev[sev_val]
+    }
+    
+    # Remove redundant fields from JSON using global substitution
+    # These fields are either shown in the header or alongside each line
+    line = $0
+    gsub(/"Role": "[^"]+", /, "", line)        # Remove Role field and trailing comma
+    gsub(/, "Role": "[^"]+"/, "", line)        # Remove Role field with leading comma
+    gsub(/"Severity": "[^"]+", /, "", line)    # Remove Severity field
+    gsub(/, "Severity": "[^"]+"/, "", line)
+    gsub(/"Package": "[^"]+", /, "", line)     # Remove Package field (always "ulc-mulpi")
+    gsub(/, "Package": "[^"]+"/, "", line)
+    gsub(/"Version" : "[^"]+", /, "", line)    # Remove Version field (shown in header)
+    gsub(/, "Version" : "[^"]+"/, "", line)
+    
+    # Remove original timestamp from the beginning (we're adding our trimmed version)
+    sub(/^[^ ]+ /, "", line)
+    
+    # Skip lines that become empty after field removal (e.g., lines with only metadata)
+    gsub(/^[{} \t]+$/, "", line)
+    if (line == "") next
+    
+    # Convert escaped newlines to actual newlines for better readability
+    gsub(/\\n/, "\n", line)
+    
+    # Output: trimmed_timestamp severity remaining_json
+    print timestamp " " severity " " line
+}
+END {
+    # Clear progress line when done
+    if (total > 0) print "" > "/dev/stderr"
+}
+AWK_EOF
+    
+    # Process the log file with AWK
+    # Use 'pv' if available for real-time progress bar, otherwise show percentage
+    if command -v pv &> /dev/null; then
+        # With pv: shows progress bar, ETA, and transfer rate
+        local file_size=$(wc -c < "$input_file")
+        pv -s "$file_size" -p -t -e -r -b "$input_file" | \
+        awk -v prev_role="$initial_role" -v total=0 "$awk_script" >> "$output_file"
+    else
+        # Without pv: shows percentage updates every 1000 lines
+        echo "Note: Install 'pv' for progress indicator (apt install pv)"
+        local total_lines=$(wc -l < "$input_file")
+        awk -v prev_role="$initial_role" -v total="$total_lines" "$awk_script" "$input_file" >> "$output_file"
+    fi
+    
+    echo "✓ Trimmed log created: $output_file"
+}
+
+
 ## This script finds all matching logs produced by log-rotate and concatenates them into a single file
 ## It then deletes the origianl files and compresses the new file
 function log-combine() {
@@ -497,11 +643,6 @@ function log-combine() {
     done
 }
 
-function log-trim() {
-    [[ -z $1 ]] && echo -e "Usage: ${FUNCNAME[0]} <path-to-log-file>" && return
-    sed -Ei.bak --quiet 's/^.*T([0-9:]+\.[0-9]{5}).*Severity": "([A-Z]+)", "Package": "([[:alpha:]_-]+).*File": "\.\.\/\.\.\/(.*)", "Line": "([0-9]+)", (.*)/\1 \2 \3 \4:\5 \6/p' "$1"
-    sed -i 's/\\n/\n/g' "$1"
-}
 
 search_logging_library() {
     local parent_dir="$HOME/git_repositories/swpkg"
