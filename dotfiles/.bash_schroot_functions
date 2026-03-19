@@ -8,7 +8,7 @@ log_file="/tmp/buildlog"
 
 ## Phone notification settings using Android 'ntfy' app
 mobile_notification=true
-# NTFY_URI='ntfy.sh/<your_ntfy_channel>'
+NTFY_URI='$NTFY_URI'
 
 ## Slack notification settings. Only to be executed on laptop
 slack_notification=true
@@ -20,6 +20,150 @@ default_temp_schroot="$default_schroot-temp"
 local_apollo_release_path="$HOME/git_repositories/swpkg/apollo-release"
 builder_apollo_release_path="$HOME/git_repos/apollo-release"
 
+# This function wraps the curl command to send notifications to the configured NTFY_URI
+# Arguments:
+#   $1 - message: The notification message body
+#   $2 - title: The notification title
+#   $3 - priority: The notification priority (e.g., default, high, urgent)
+#   $4 - tags: Comma-separated list of emoji tags (e.g., "partying_face,tada")
+# Note: Only sends notification if mobile_notification is set to true and NTFY_URI is configured
+send_mobile_notification() {
+	if [ "$mobile_notification" != true ] || [ -z "$NTFY_URI" ]; then
+		return
+	fi
+	local message="$1"
+	local title="$2"
+	local priority="$3"
+	local tags="$4"
+	
+	curl -d "$message" \
+		-H "Title: $title" \
+		-H "Priority: $priority" \
+		-H "Tags: $tags" \
+		"$NTFY_URI" > /dev/null 2>&1
+}
+
+alias fbe2e='forge build -j16 && { forge containers build && forge buildenv release || echo "ERROR: containers build failed"; } || echo "ERROR: package build failed"'
+alias fbe2e-away='nohup sh -c "forge build -j16 && { forge containers build && forge buildenv release || echo \"ERROR: containers build failed\"; } || echo \"ERROR: package build failed\"" > ./forge_e2e_build_$(date +%Y%m%d_%H%M%S).log 2>&1 &'
+
+alias forge_rebase='forge buildenv apt-lock --force'
+
+
+forge_build_e2e() {
+    # Configurable commands
+    local command1="forge build"
+	local cmd1_error="Error: package build failed"
+    local command2="forge containers build"
+	local cmd2_error="Error: containers build failed"
+    local command3="forge buildenv release"
+
+    # Check for --away flag
+    local use_nohup=false
+    local output_file="./forge_build_e2e_$(date +%Y%m%d_%H%M%S).log"
+    
+    for arg in "$@"; do
+        case "$arg" in
+            --away|--detached|--background)
+                use_nohup=true
+                ;;
+            --output=*)
+                output_file="${arg#*=}"
+                ;;
+            --help|-h)
+                echo "Usage: forge_build_e2e [OPTIONS]"
+                echo "Options:"
+                echo "  --away, --detached, --background    Run in background with nohup"
+                echo "  --output=FILE                       Specify output file (default: ./forge_build_e2e_<CUR_DATE>.log)"
+                echo "  --help, -h                          Show this help message"
+                return 0
+                ;;
+        esac
+    done
+
+	local cmd
+	export mobile_notification
+	export NTFY_URI
+	export -f send_mobile_notification
+	# The alternative command will send mobile notifications if enabled on both failures and successes for each step.
+	# The following command in the sequence will only execute if the previous one succeeded.
+	cmd="$command1 && $command2 && output=\$($command3 2>&1)"
+	cmd+=" && { echo \"\$output\";"
+	cmd+=" release_version=\$(grep -oP '(?<=Release )[^ ]+(?= is done)' \"\$output\");"
+	cmd+=" echo \"Forge build e2e completed successfully.\";"
+	if [ "$mobile_notification" = true ]; then
+		cmd+=" send_mobile_notification \"Release \$release_version has been successfully created.\" \"Build Succeeded\" \"default\" \"partying_face,tada\";"
+	fi
+	cmd+=" true; }"
+	cmd+=" || {"
+	cmd+=" if ! $command1; then"
+	cmd+=" echo \"$cmd1_error\";"
+	if [ "$mobile_notification" = true ]; then
+		cmd+=" send_mobile_notification \"$cmd1_error\" \"Build Failed\" \"high\" \"rotating_light,warning\";"
+	fi
+	cmd+=" elif ! $command2; then"
+	cmd+=" echo \"$cmd2_error\";"
+	if [ "$mobile_notification" = true ]; then
+		cmd+=" send_mobile_notification \"$cmd2_error\" \"Containers build Failed\" \"high\" \"rotating_light,warning\";"
+	fi
+	cmd+=" else"
+	cmd+=" echo \"Release creation failed\";"
+	if [ "$mobile_notification" = true ]; then
+		cmd+=" send_mobile_notification \"Release creation failed\" \"Build Failed\" \"high\" \"rotating_light,warning\";"
+	fi
+	cmd+=" fi;"
+	cmd+=" false; }"
+
+
+
+    # Execute with or without nohup
+    if [ "$use_nohup" = true ]; then
+        nohup bash -c "$cmd" > "$output_file" 2>&1 &
+        local pid=$!
+        echo "Process started in background with PID: $pid"
+        echo "Output will be saved to: $output_file"
+        echo "Monitor with: tail -f $output_file"
+    else
+        bash -c "$cmd"
+    fi
+}
+
+# Bash completion function
+_forge_build_e2e_completion() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    
+    # Available options
+    opts="--away --detached --background --output= --help -h"
+    
+    # Handle --output= completion with file paths
+    if [[ ${cur} == --output=* ]]; then
+        local path_prefix="${cur#--output=}"
+        COMPREPLY=( $(compgen -f -- "$path_prefix") )
+        return 0
+    fi
+    
+    # Handle completion after --output
+    if [[ ${prev} == "--output" ]]; then
+        COMPREPLY=( $(compgen -f -- "$cur") )
+        return 0
+    fi
+    
+    # Standard flag completion
+    if [[ ${cur} == -* ]]; then
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    fi
+}
+
+# Register the completion
+complete -F _forge_build_e2e_completion forge_build_e2e
+
+
+#######################################################
+#############  Schroot build functions  ###############
+#######################################################
 
 ## Autocompletion function returning the list of available schroots
 function _current_schroots()
@@ -41,7 +185,7 @@ get_matching_schroot()
 	echo "$matching_schroot"
 }
 
-slack_message() { $slack_msg_script_path "$1"; }
+send_slack_notification() { $slack_msg_script_path "$1"; }
 
 buildn()
 {
@@ -55,25 +199,15 @@ buildn()
 	build_retcode=$?
 	if [ $build_retcode -ne 0 ]; then
 		msg="Compilation of $package_name using $schroot has failed."
-
 		echo "$msg"
-		[ "$mobile_notification" = true ] && curl -d "$(cat $log_file)" \
-		-H "Title: $msg" \
-		-H 'Priority: high' \
-		-H "Tags: rotating_light,warning,rotating_light" \
-		"$NTFY_URI" > /dev/null 2>&1
-
-		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ]  && slack_message ":skull: $msg :skull:"
+		[ "$mobile_notification" = true ] && send_mobile_notification "$(cat $log_file)" "$msg" "high" "rotating_light,warning,rotating_light"
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ]  && send_slack_notification ":skull: $msg :skull:"
 	else
 		msg="Compilation of $package_name using $schroot successfully finished."
-
 		echo "$msg"
-		[ "$mobile_notification" = true ] && curl -d "$msg" \
-		-H 'Title: Compilation passed!' \
-		-H 'Priority: default' \
-		-H "Tags: partying_face,tada" \
-		"$NTFY_URI" > /dev/null 2>&1
-		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && slack_message ":dance_penguin::partying_face: $msg :partying_face::dance_penguin:"
+		# Handle notifications
+		[ "$mobile_notification" = true ] && send_mobile_notification "$msg" "Compilation passed!" "default" "partying_face,tada"
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && send_slack_notification ":dance_penguin::partying_face: $msg :partying_face::dance_penguin:"
 
 		\rm "$log_file"
 	fi
@@ -92,15 +226,9 @@ builddn()
 	deps_retcode=$?
 	if [ $deps_retcode -ne 0 ]; then
 		msg="Error on $package_name build-deps using $schroot."
-
 		echo "$msg"
-		[ "$mobile_notification" = true ] && curl -d "$(cat $log_file)" \
-		-H "Title: $msg" \
-		-H 'Priority: urgent' \
-		-H "Tags: rotating_light" \
-		"$NTFY_URI" > /dev/null 2>&1
-
-		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && slack_message ":tired_face: $msg :tired_face:"
+		[ "$mobile_notification" = true ] && send_mobile_notification "$(cat $log_file)" "$msg" "urgent" "rotating_light"
+		[ "$slack_notification" = true ] && [ "$(hostname)" = "$slack_script_hostname" ] && send_slack_notification ":tired_face: $msg :tired_face:"
 	else
 		buildn "$schroot"
 	fi
