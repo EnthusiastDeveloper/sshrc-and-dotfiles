@@ -85,17 +85,43 @@ _ests() {
 }
 complete -F _ests ests
 
-## List the images used by all containers of a given pod
-get-pods-images() {
-    if [ $# -lt 1 ]; then
-        echo "Usage: ${FUNCNAME[0]} <pod>"
-        return
-    fi
+## List the images used by all the containers of a given pod
+kpod_images() {
+  local pod="$1"
+  if [[ -z "$pod" ]]; then
+    echo "Usage: kpod_images <pod-name>" >&2
+    return 1
+  fi
 
-    kp "$1" -o jsonpath='{range .spec.containers[*]}{.name}{": "}{.image}{"\n"}{end}'
+  kubectl get pod "$pod" -o jsonpath='{range .spec.containers[*]}{.name}{"\t"}{.image}{"\n"}{end}' \
+  | awk -F'\t' '
+    BEGIN {
+      printf "%-30s %-30s %s\n", "CONTAINER", "VERSION", "IMAGE"
+      printf "%-30s %-30s %s\n", "---------", "-------", "-----"
+    }
+    {
+      name=$1; image=$2; version="latest"
+
+      n=split(image, parts, "@")
+      base=parts[1]
+      digest=(n > 1 ? parts[2] : "")
+
+      last=base
+      sub(/^.*\//, "", last)
+
+      if (digest != "") {
+        version=digest
+      } else if (index(last, ":") > 0) {
+        split(last, t, ":")
+        version=t[length(t)]
+      }
+
+      printf "%-30s %-30s %s\n", name, version, image
+    }'
 }
+complete -F _pods kpod_images
 
-complete -F _pods ls-pods-container
+
 
 ## Exec a command in a given pod/container. If no command is passed - start new shell session
 to-exec() {
@@ -149,29 +175,69 @@ _complete_pod_and_container() {
 complete -F _complete_pod_and_container to-exec
 
 ## Fetch logs from a given pod/container without timestamps
+## Usage: kl <pod> [container] [additional kubectl logs args]
+## Note: If container is omitted, all remaining args are treated as kubectl flags
 function kl() {
     if [ $# -lt 1 ]; then
-        echo "Usage:  ${FUNCNAME[0]} <pod> <container> [filters]" ; return
+        echo "Usage:  ${FUNCNAME[0]} <pod> [container] [additional kubectl logs args]"
+        return
     fi
-    local args=()
-    local container_args=()
-    if [ -n "$3" ]; then args=("${@:3}"); fi
-    if [ -n "$2" ]; then container_args=("-c" "$2"); fi
-
-    eval kubectl logs "$1" "${container_args[@]}" "${args[@]}"
+    
+    local pod="$1" ; shift
+    
+    # Check if second argument looks like a container name (not a kubectl flag)
+    if [ $# -gt 0 ] && [[ ! "$1" =~ ^- ]]; then
+        # Second arg doesn't start with '-', treat it as container name
+        local container="$1" ; shift
+        kubectl logs "$pod" -c "$container" "$@"
+    else
+        # No container specified, or second arg is a flag - pass all args to kubectl
+        kubectl logs "$pod" "$@"
+    fi
 }
 
 ## Fetch logs from a given pod/container with timestamps
-## This function is similar to kl but adds the --timestamps flag
+## Usage: klt <pod> [container] [additional kubectl logs args]
 function klt() {
     if [ $# -lt 1 ]; then
-        echo "Usage:  ${FUNCNAME[0]} <pod> <container> [filters]" ; return
+        echo "Usage:  ${FUNCNAME[0]} <pod> [container] [additional kubectl logs args]"
+        return
     fi
-    eval kl "$@" --timestamps
+    kl "$@" --timestamps
+}
+
+## Fetch logs from the active mulpi container in the first LCCE (or a specified pod)
+## Usage: klm [pod] [additional kubectl logs args]
+function klm() {
+    local pod=""
+    local args=()
+    
+    # Check if first argument looks like a pod name
+    if [[ "$1" =~ vcmts.*-cd-[0-9]+ ]]; then
+        pod="$1"
+        shift
+        args=("$@")
+    else
+        # Get the active pod name
+        first_cluter_status=$(echo "show cluster status" | kubectl exec vcmts-m-0 -ic confd -- su admin | grep -m1 "CMTS LCCE")
+        lcce_num=$(echo "$first_cluter_status" | awk '{print $3}')
+        pod=$(echo "$first_cluter_status" | awk '{print $6}')
+        echo "Using active pod of LCCE $lcce_num: $pod" >&2
+        args=("$@")
+    fi
+
+    kl "$pod" mulpi "${args[@]}"
+}
+
+## Fetch logs from mulpi container with timestamps
+function klmt() {
+    klm "$@" --timestamps
 }
 
 complete -F _complete_pod_and_container kl
 complete -F _complete_pod_and_container klt
+complete -F _cd_pods klm
+complete -F _cd_pods klmt
 
 alias to-confd='kubectl exec vcmts-m-0 -itc confd -- bash'
 alias to-ipdr='kubectl exec vcmts-m-0 -itc ipdr -- bash'
@@ -448,20 +514,51 @@ function search_all_k8s_logs() {
 
 
 # Start an interactive bash session inside mulpi container. Pod number is passed with argument.
+# Optional command can be passed to execute inside the container.
+# Usage:
+#   to-mulpi                    -> interactive shell on active pod
+#   to-mulpi vcmts-cd-0-0         -> interactive shell on specified pod
+#   to-mulpi vcmts-cd-0-0 ls -la  -> execute command on specified pod
+#   to-mulpi ls -la             -> execute command on active pod
 function to-mulpi() {
+    local pod=""
+    local cmd_args=()
+    local use_active_pod=false
+    
     if [ -z "$1" ]; then
+        # No arguments - interactive shell on active pod
+        use_active_pod=true
+    else
+        # Check if first argument looks like a pod name (contains 'vcmts' or 'mulpi')
+        if [[ "$1" =~ vcmts-cd-.* ]]; then
+            # First arg is a pod name
+            pod="$1"
+            shift
+            cmd_args=("$@")
+        else
+            # First arg is a command - use active pod
+            use_active_pod=true
+            cmd_args=("$@")
+        fi
+    fi
+    
+    if [ "$use_active_pod" = true ]; then
         # Get the active pod name
         first_cluter_status=$(echo "show cluster status" | kubectl exec vcmts-m-0 -ic confd -- su admin | grep -m1 "CMTS LCCE")
         lcce_num=$(echo "$first_cluter_status" | awk '{print $3}')
-        active_pod=$(echo "$first_cluter_status" | awk '{print $6}')
-        command="kubectl exec -itc mulpi $active_pod -- bash"
-        echo "Entering active pod of LCCE $lcce_num: $active_pod"
-    else
-        command="kubectl exec $1 -itc mulpi -- bash"
+        pod=$(echo "$first_cluter_status" | awk '{print $6}')
+        echo "Using active pod of LCCE $lcce_num: $pod"
     fi
 
-    echo "Executing $command"
-    eval "$command"
+    if [ ${#cmd_args[@]} -eq 0 ]; then
+        # No command, start interactive shell
+        command="kubectl exec -itc mulpi $pod -- bash"
+        echo "Executing $command"
+        eval "$command"
+    else
+        # Command is present, execute it
+        kubectl exec -itc mulpi "$pod" -- /bin/bash -c "${cmd_args[*]}"
+    fi
 }
 
 _cd_pods() {
@@ -491,6 +588,146 @@ _snooping_pods() {
 }
 
 complete -F _snooping_pods to-snooping
+
+## Copy files to/from pods using kubectl cp (container required)
+## Usage: kcp <source> <destination> <container>
+## Examples:
+##   kcp pod-name:/path/to/file /local/path mulpi  - copy from pod to local
+##   kcp /local/file pod-name:/path/to/file mulpi  - copy from local to pod
+function kcp() {
+    if [ $# -lt 3 ]; then
+        echo "Usage: ${FUNCNAME[0]} <source> <destination> <container>"
+        echo ""
+        echo "Copy files to/from Kubernetes pods."
+        echo ""
+        echo "Examples:"
+        echo "  ${FUNCNAME[0]} pod-name:/remote/file.txt ./local/ mulpi    # from pod to local"
+        echo "  ${FUNCNAME[0]} ./local/file.txt pod-name:/remote/ mulpi    # from local to pod"
+        return
+    fi
+    
+    local source="$1"
+    local destination="$2"
+    local container="$3"
+    
+    kubectl cp "$source" "$destination" -c "$container"
+}
+
+## Copy files to/from the active mulpi container (or specified pod)
+## Usage: 
+##   kcpm <remote-path> <local-path>              - copy from active pod
+##   kcpm <local-path> <remote-path>              - copy to active pod
+##   kcpm <pod> <remote-path> <local-path>        - copy from specified pod
+##   kcpm <pod> <local-path> <remote-path>        - copy to specified pod
+function kcpm() {
+    if [ $# -lt 2 ]; then
+        echo "Usage: ${FUNCNAME[0]} [pod] <source> <destination>"
+        echo ""
+        echo "Copy files to/from mulpi container."
+        echo ""
+        echo "Examples:"
+        echo "  ${FUNCNAME[0]} /var/log/app.log ./              # from active pod"
+        echo "  ${FUNCNAME[0]} ./config.yaml /etc/app/          # to active pod"
+        echo "  ${FUNCNAME[0]} vcmts-cd-0 /var/log/app.log ./   # from specified pod"
+        echo "  ${FUNCNAME[0]} vcmts-cd-0 ./config.yaml /etc/   # to specified pod"
+        return
+    fi
+    
+    local pod=""
+    local source=""
+    local destination=""
+    
+    # Check if first argument is a pod name
+    if [[ "$1" =~ vcmts.*-cd-[0-9]+ ]]; then
+        # 3-arg format: pod source destination
+        pod="$1"
+        source="$2"
+        destination="$3"
+    else
+        # 2-arg format: source destination (use active pod)
+        first_cluter_status=$(echo "show cluster status" | kubectl exec vcmts-m-0 -ic confd -- su admin | grep -m1 "CMTS LCCE")
+        lcce_num=$(echo "$first_cluter_status" | awk '{print $3}')
+        pod=$(echo "$first_cluter_status" | awk '{print $6}')
+        echo "Using active pod of LCCE $lcce_num: $pod" >&2
+        source="$1"
+        destination="$2"
+    fi
+    
+    # Determine direction and build kubectl cp command
+    if [[ "$source" =~ ^/ ]]; then
+        # Source is absolute path = remote file, copy from pod
+        kubectl cp "$pod:$source" "$destination" -c mulpi
+    else
+        # Source is local file, copy to pod
+        kubectl cp "$source" "$pod:$destination" -c mulpi
+    fi
+}
+
+# Completion function for kcp - extracts pod name from pod:path syntax
+_kcp_completion() {
+    _init_completion || return
+    
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    
+    case "$COMP_CWORD" in
+        1|2)
+            # For source and destination, offer pod names with colon or file paths
+            if [[ "$cur" != *:* ]]; then
+                # No colon yet, offer pod names with colon suffix
+                local pods
+                pods=$(kp | awk '/^[^NAME]/ {print $1":"}')
+                mapfile -t COMPREPLY < <(compgen -W "$pods" -- "$cur")
+                # Also include file completion
+                compopt -o nospace
+                COMPREPLY+=( $(compgen -f -- "$cur") )
+            else
+                # After colon, no remote path completion available
+                COMPREPLY=()
+            fi
+            ;;
+        3)
+            # Third argument is container name
+            # Extract pod name from source or destination (before the colon)
+            local pod=""
+            if [[ "${COMP_WORDS[1]}" =~ ^([^:]+): ]]; then
+                pod="${BASH_REMATCH[1]}"
+            elif [[ "${COMP_WORDS[2]}" =~ ^([^:]+): ]]; then
+                pod="${BASH_REMATCH[1]}"
+            fi
+            
+            if [ -n "$pod" ]; then
+                local containers
+                containers=$(kpc "$pod" 2>/dev/null)
+                mapfile -t COMPREPLY < <(compgen -W "$containers" -- "$cur")
+            fi
+            ;;
+    esac
+}
+
+# Completion function for kcpm
+_kcpm_completion() {
+    _init_completion || return
+    
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    
+    case "$COMP_CWORD" in
+        1)
+            # First arg: pod name or local/remote path
+            local pods
+            pods=$(kp | awk '/vcmts-cd/ {print $1}')
+            mapfile -t COMPREPLY < <(compgen -W "$pods" -- "$cur")
+            # Also include file completion
+            COMPREPLY+=( $(compgen -f -- "$cur") )
+            ;;
+        2|3)
+            # Just file completion for paths
+            mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+            ;;
+    esac
+}
+
+complete -F _kcp_completion kcp
+complete -F _kcpm_completion kcpm
 
 
 ulc-debug() {
