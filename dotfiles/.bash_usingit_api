@@ -18,6 +18,45 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Timeout settings (in seconds)
+CURL_CONNECT_TIMEOUT=4  # Connection timeout
+CURL_MAX_TIME=10         # Maximum time for entire operation
+
+curl_with_timeout() {
+    local curl_exit_code
+	local output
+	curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "$@"
+	curl_exit_code=$?
+    # Handle timeout-specific exit codes
+    case $curl_exit_code in
+        0)
+            # Success - output already passed through
+            return 0
+            ;;
+        6)
+            echo -e "\n\t${RED}Error: Could not resolve host. Check network connectivity.$NC" >&2
+            return 6
+            ;;
+        7)
+            echo -e "\n\t${RED}Error: Failed to connect to server. Service may be down.$NC" >&2
+            return 7
+            ;;
+        28)
+            echo -e "\n\t${RED}Error: Operation timed out after ${CURL_MAX_TIME}s. Service may be slow or unresponsive.$NC" >&2
+            return 28
+            ;;
+        35)
+            echo -e "\n\t${RED}Error: SSL connection error.$NC" >&2
+            return 35
+            ;;
+        *)
+            # Other curl errors
+            echo -e "\n\t${RED}Error: curl failed with exit code $curl_exit_code$NC" >&2
+            return $curl_exit_code
+            ;;
+    esac
+}
+
 ME=$WORK_USERNAME
 
 get_reservation_time_string() {
@@ -73,7 +112,7 @@ convert_timestamp_to_seconds() {
 }
 
 current_user(){
-	TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$1"'/details/')
+	TPLAIN=$(curl_with_timeout -s 'http://usingit-edge.harmonicinc.com/'"$1"'/details/')
 	USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
 	USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
     [ -z "$USU" ] && return 1 || return 0
@@ -87,7 +126,7 @@ fetch_usingit(){
         export SETUPNOTEXIST=1
         return 0
 	fi
-	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+	RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
 	TINFO=$(cat tinfo.txt)
 	$(which rm) tinfo.txt > /dev/null 2>&1
 	if [[ $RC == "404" || $RC == "502" ]]; then
@@ -129,7 +168,7 @@ reserve_setup(){
 		printf "Username: "
 		read -r USERNAME
 	fi
-	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+	RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
     TINFO=$(cat tinfo.txt)
 	$(which rm) tinfo.txt
 	if [[ $RC == "404" ]]; then
@@ -158,7 +197,7 @@ reserve_setup(){
 	printf "Time: "
 	read -r TIME
 	TIME=${TIME:-0}
-	RC=$(curl -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/reserve_setup_by_name/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"username": "'"$USERNAME"'","reservation_purpose": "'"$PURPOSE"'","should_run_health_check": false}')
+	RC=$(curl_with_timeout -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/reserve_setup_by_name/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"username": "'"$USERNAME"'","reservation_purpose": "'"$PURPOSE"'","should_run_health_check": false}')
 	RESPONSE=$(cat response.txt)
 	$(which rm) response.txt
 	case "$RC" in
@@ -169,10 +208,10 @@ reserve_setup(){
 			return 0
 			;;
 		403)
-			RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+			RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
 			TINFO=$(cat tinfo.txt)
 			$(which rm) tinfo.txt
-			TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
+			TPLAIN=$(curl_with_timeout -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
 			USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
 			USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
 			if [[ "$USU" != "$USERNAME" ]]; then
@@ -203,7 +242,7 @@ reserve_setup(){
 	RID=$(echo "$RESPONSE" | jq -r '.reservation_id')
 
 	total_seconds=$(convert_timestamp_to_seconds "$TIME")
-	RESPONSE=$(curl -s -X 'PUT'  'http://usingit-edge.harmonicinc.com/api/update_reservation_settings/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"time": '"$total_seconds"'}')
+	RESPONSE=$(curl_with_timeout -s -X 'PUT'  'http://usingit-edge.harmonicinc.com/api/update_reservation_settings/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{"time": '"$total_seconds"'}')
 	echo -e "\t$GREEN$(echo "$RESPONSE" | jq -r '.detail')$NC\n"
 }
 
@@ -212,7 +251,7 @@ queue_setup() {
 		return 0
 	fi
 
-    RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+    RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
 	TINFO=$(cat tinfo.txt)
 	$(which rm) tinfo.txt
 	if [[ $RC == "404" ]]; then
@@ -256,7 +295,7 @@ queue_setup() {
     reservation_time=$(get_reservation_time_string "$TIME")
     curl_data='{"username": "'"$USERNAME"'","queue_'$SID'-reservation_time": "'"$reservation_time"'","queue_'$SID'-reservation_time_choice": "Custom", "queue_'$SID'-purpose": "'"$PURPOSE"'","queue_'$SID'-should_run_health_check": false}'
     echo "DEBUG: curl_data=$curl_data"
-	RC=$(curl -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/take_queue/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d  "$curl_data")
+	RC=$(curl_with_timeout -s -o response.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/take_queue/'"$SETUPNAME"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d  "$curl_data")
 	RESPONSE=$(cat response.txt)
 	$(which rm) response.txt
 
@@ -274,10 +313,10 @@ queue_setup() {
 			return 0
 			;;
 		403)
-			RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+			RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
 			TINFO=$(cat tinfo.txt)
 			$(which rm) tinfo.txt
-			TPLAIN=$(curl -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
+			TPLAIN=$(curl_with_timeout -s 'http://usingit-edge.harmonicinc.com/'"$SID"'/details/')
 			USU=$(echo "$TPLAIN" | $(which grep) -oP -m1 "updateReservationStatus.*;")
 			USU=$(echo "$USU" | cut -d ' ' -f2 | cut -c2- | rev | cut -c4- | rev)
 			if [[ "$USU" != "$USERNAME" ]]; then
@@ -301,7 +340,7 @@ release_setup(){
 	if [[ -z $SETUPNAME || -n $SETUPNOTEXIST ]]; then
         return 0
     fi
-	RC=$(curl -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
+	RC=$(curl_with_timeout -s -o tinfo.txt -w "%{response_code}" 'http://usingit-edge.harmonicinc.com/api/get_topology_info/'"$SETUPNAME"'/')
     TINFO=$(cat tinfo.txt)
 	$(which rm) tinfo.txt
 	if [[ $RC == "404" ]]; then
@@ -334,7 +373,7 @@ release_setup(){
 		stty echo
 	fi
 
-	RC=$(curl -s -o release.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/release/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{
+	RC=$(curl_with_timeout -s -o release.txt -w "%{response_code}" -X 'POST' 'http://usingit-edge.harmonicinc.com/api/release/'"$RID"'/' -H 'accept: application/json' -H 'Content-Type: application/json' -u "$USERNAME:$PASSWORD" -d '{
   "should_run_health_check": true
 }')
 	case "$RC" in
