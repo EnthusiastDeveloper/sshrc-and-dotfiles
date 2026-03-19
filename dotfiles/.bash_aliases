@@ -18,6 +18,8 @@ alias sshb='ssh $BUILDER'
 
 ## SSH and SCP using user 'dev'
 function myssh() {
+    # Reset OPTIND in case getopts has been used previously in the shell
+    OPTIND=1
     # check if sshrc is installed
     local command_to_run
     command_to_run=$(command -v sshrc >/dev/null 2>&1 && echo "sshrc" || echo "ssh")
@@ -25,24 +27,25 @@ function myssh() {
     local pass_file
     # Set default password file for work accounts
     if [[ $(whoami) == "$WORK_USERNAME" ]]; then
-        pass_file=".password_apollo"
+        user_selected_pass_file=".password_apollo"
     fi
 
     # Select sshpass file based on argument: '-a' for apollo, '-r' for RPD (user=admin), '-v' for vcmts, '-h' for harmonic
     while getopts 'ahrv' OPTION; do
         case $OPTION in
-            a) pass_file=".password_apollo"         && shift $((OPTIND - 1)) ;;
-            h) pass_file=".password_harmonic"       && shift $((OPTIND - 1)) ;;
-            r) pass_file=".password_apollo_admin"   && shift $((OPTIND - 1)) ;;
-            v) pass_file=".password_vcmts"          && shift $((OPTIND - 1)) ;;
+            a) user_selected_pass_file=".password_apollo"       ;;
+            h) user_selected_pass_file=".password_harmonic"     ;;
+            r) user_selected_pass_file=".password_apollo_admin" ;;
+            v) user_selected_pass_file=".password_vcmts"        ;;
             ?) echo "Usage: ${FUNCNAME[0]} [-a (apollo) | -r (RPD) | -v (VCMTS) | -h (harmonic)] <hostname>"; return 0 ;;
         esac
     done
-
+    shift $((OPTIND - 1))
+    
     # Search for the password file in "$HOME" or "$SSHHOME"
-    pass_file=$($(which find) "$HOME" -maxdepth 1 -name "$pass_file" 2>/dev/null)
+    pass_file=$($(which find) "$HOME" -maxdepth 1 -name "$user_selected_pass_file" 2>/dev/null)
     if [[ -z $pass_file ]]; then
-        pass_file=$($(which find) "$SSHHOME" -name "$pass_file" 2>/dev/null)
+        pass_file=$($(which find) "$SSHHOME" -name "$user_selected_pass_file" 2>/dev/null)
         if [[ -z $pass_file ]]; then
             echo "Error: Password file $pass_file not found!"
             return 1
@@ -362,4 +365,5 @@ alias joplinup='wget -O - https://raw.githubusercontent.com/laurent22/joplin/dev
 
 ##################  VPN Functions  ##################
 alias vpc='set-konsole-tab-title VPN; cd /etc/openfortivpn; clear; sudo openfortivpn --persistent=15 --config /etc/openfortivpn/config'
-alias vpk='sudo "$HOME"/.local/bin/kill-vpn'
+alias vpk="sudo pkill -f '/opt/forticlient/fctsched'"
+alias vpk_old='sudo "$HOME"/.local/bin/kill-vpn'
