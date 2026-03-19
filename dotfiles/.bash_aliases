@@ -165,7 +165,7 @@ alias nmap_formatter="xmlstarlet sel -t -m '/nmaprun/host[status/@state=\"up\"]'
 
 # nmap shortcuts for home networks scanning
 alias nmap='sudo nmap'
-local_network_address=$(ip -o -4 addr list | awk '{print $4}' | cut -d/ -f1 | grep "192.168" | awk -F. '{print $1"."$2"."$3".0/24"}')
+local_network_address=$($(which ip) -o -4 addr list | awk '{print $4}' | cut -d/ -f1 | grep "192.168" | awk -F. '{print $1"."$2"."$3".0/24"}')
 alias nmap_home='nmap -sn "$local_network_address" -oX - | nmap_formatter'
 
 ##############################################
@@ -176,8 +176,6 @@ alias nmap_home='nmap -sn "$local_network_address" -oX - | nmap_formatter'
 alias reboot='sudo reboot'
 alias shutdown='sudo shutdown now'
 alias find='sudo find'
-alias podman='sudo podman '
-
 alias please='sudo !!'
 ##############################################
 
@@ -193,7 +191,7 @@ alias pacorphans='pacman -Qtdq'
 alias pacdelorphans='pacman -Rns $(pacman -Qtdq)'
 alias pacclean='pacman -Sc'
 alias paccleanall='pacman -Scc'
-
+alias pacnew='sudo find /etc -type f -name "*.pacnew"'
 alias pacdiff='sudo pacdiff '
 
 
@@ -221,51 +219,15 @@ alias aptcleanall='apt autoclean'
 ##############################################
 
 
-#################   Podman  ##################
-alias pps='podman ps'
-alias ppsa='podman ps -a'
-alias ppod='podman pod list'
-alias prmi='podman rmi'
-##############################################
-
-
 ######   Interactive File Interaction   ######
 # Do not delete / or prompt if deleting more than 3 files at a time
-alias rm='rm -I --preserve-root'
+alias rm='\rm -I --preserve-root'
 # Confirmations
 alias mv='mv -i'
 alias cp='cp -i'
 alias ln='ln -i'
 ##############################################
 
-
-##########    Debian Build system   ##########
-# alias dch='dch -Dunstable --urgency=low'
-SCHROOT_PI="pi37"
-alias build='nsg-schroot-run $SCHROOT_PI-apollo -- dpkg-buildpackage -us -uc -b -j4'
-alias buildd='nsg-schroot build-deps $SCHROOT_PI-apollo . && build'
-alias buildexor='nsg-schroot-run exor-$SCHROOT_PI -- dpkg-buildpackage -us -uc -b -aarmhf -j4'
-
-function dch() {
-    if [[ ! -d "debian" ]]; then
-        echo "Error: This function is meant to be called from a root directory of a debian package."
-        return 1
-    fi
-    cmd="$(which dch) -n -Dunstable --urgency=low"
-    if [ -z "$1" ]; then
-        eval "$cmd"
-    else
-        eval "$cmd" "$1"
-    fi
-    grep -q "Non-maintainer" "debian/changelog" && sed -i '1,6{/Non-maintainer upload/d}' debian/changelog
-}
-##############################################
-
-function nsg-stop-all-sessions() {
-    for s in $(nsg-schroot list-all | awk '{if($1 == "session::") {print $2}}'); do
-        nsg-schroot session-end "$s"
-    done
-}
 
 ##########       Navigations       ###########
 alias ..='cd ..'

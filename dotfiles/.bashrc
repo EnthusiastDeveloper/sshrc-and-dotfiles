@@ -47,6 +47,9 @@ shopt -s promptvars
 # match all files and zero or more directories and subdirectories.
 #shopt -s globstar
 
+if [[ -d $HOME/.npm-global/bin ]]; then
+    export PATH="$HOME/.npm-global/bin:$PATH "
+fi
 
 if [[ -d $HOME/.local/bin ]]; then
     export PATH="$HOME/.local/bin:$HOME/.npm_global/bin:$PATH"
@@ -155,8 +158,9 @@ if ! shopt -oq posix; then
     fi
 fi
 
-# Enable auto-completion for podman
-if command -v podman &> /dev/null; then source <(podman completion bash); fi
+
+# Enable auto-completion for zellij terminal emulator
+if command -v zellij &> /dev/null; then source <(zellij setup --generate-completion "$(echo "$SHELL" | awk -F'/' '{print $NF}')"); fi
 
 # Enable auto-completion for docker
 if command -v docker &> /dev/null; then source <(docker completion bash); fi
@@ -210,5 +214,14 @@ if command -v nsg-schroot &>/dev/null; then
         . "$HOME/.bash_schroot_functions"
     elif [ -f "$SSHHOME/.sshrc.d/.bash_schroot_functions" ]; then
         . "$SSHHOME/.sshrc.d/.bash_schroot_functions"
+    fi
+fi
+
+# Source bash_podman if podman is installed
+if command -v podman &>/dev/null; then
+    if [ -f "$HOME/.bash_podman" ]; then
+        . "$HOME/.bash_podman"
+    elif [ -f "$SSHHOME/.sshrc.d/.bash_podman" ]; then
+        . "$SSHHOME/.sshrc.d/.bash_podman"
     fi
 fi

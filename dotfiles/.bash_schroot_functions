@@ -2,7 +2,7 @@
 
 ##############  Schroot related functions  ##############
 
-current_pi="pi44"
+current_pi="pi48"
 default_schroot="$current_pi-apollo"
 log_file="/tmp/buildlog"
 
@@ -234,6 +234,14 @@ builddn()
 	fi
 }
 complete -F _current_schroots builddn
+
+## Kill all leftover schroot sessions
+function nsg-stop-all-sessions() {
+    for s in $(nsg-schroot list-all | awk '{if($1 == "session::") {print $2}}'); do
+        nsg-schroot session-end "$s"
+    done
+}
+
 
 nsg-schroot-maintain()
 {

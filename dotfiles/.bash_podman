@@ -1,0 +1,146 @@
+#!/bin/bash
+
+# ~/.bash_podman
+# Enhanced Podman environment: functions + bash completion + smart container name completion
+
+# Load Podman bash completion if available
+if command -v podman &>/dev/null && [ -f /usr/share/bash-completion/completions/podman ]; then
+    source /usr/share/bash-completion/completions/podman
+elif command -v podman &>/dev/null && podman completion bash &>/dev/null; then
+    source <(podman completion bash)
+fi
+
+# ------------------------
+# Completion Helpers
+# ------------------------
+# Provide running container names
+_podman_running_containers() {
+    local containers
+    IFS=$'\n' read -r -d '' -a containers < <(podman ps --format '{{.Names}}' && printf '\0')
+    COMPREPLY=( $(compgen -W "${containers[*]}" -- "${COMP_WORDS[COMP_CWORD]}") )
+}
+
+_podman_all_containers() {
+    local containers
+    IFS=$'\n' read -r -d '' -a containers < <(podman ps -a --format '{{.Names}}' && printf '\0')
+    COMPREPLY=( $(compgen -W "${containers[*]}" -- "${COMP_WORDS[COMP_CWORD]}") )
+}
+
+_podman_images() {
+    local images
+    IFS=$'\n' read -r -d '' -a images < <(podman images --format '{{.Repository}}:{{.Tag}}' && printf '\0')
+    COMPREPLY=( $(compgen -W "${images[*]}" -- "${COMP_WORDS[COMP_CWORD]}") )
+}
+
+_podman_volumes() {
+    local volumes
+    IFS=$'\n' read -r -d '' -a volumes < <(podman volume ls --format '{{.Name}}' && printf '\0')
+    COMPREPLY=( $(compgen -W "${volumes[*]}" -- "${COMP_WORDS[COMP_CWORD]}") )
+}
+
+
+# ------------------------
+# Function Replacements
+# ------------------------
+
+# Containers
+alias p='podman'
+function pps { podman ps "$@"; }
+function ppsa { podman ps -a "$@"; }
+
+function pl { podman logs -t "$@"; }
+function pli { podman logs -t -f "$@"; }
+complete -F _podman_running_containers pli
+complete -F _podman_all_containers pl
+
+function pstart { podman start "$@"; }
+function pstop { podman stop "$@"; }
+function pkill { podman kill "$@"; }
+complete -F _podman_running_containers pstop
+complete -F _podman_running_containers pkill
+complete -F _podman_all_containers pstart
+
+function prm { podman rm "$@"; }
+function prmi { podman rmi "$@"; }
+function pexec { podman exec -it "$@" /bin/bash; }
+complete -F _podman_running_containers pexec
+
+function prun { podman run -it --rm "$@"; }
+function pimages { podman images "$@"; }
+
+function pbash {
+    local cid
+    cid=$(podman ps -q | head -n1)
+    if [ -n "$cid" ]; then
+        podman exec -it "$cid" bash
+    else
+        echo "No running containers found"
+    fi
+}
+
+# System
+alias pinfo='podman info'
+function ptop { podman top "$@"; }
+function pstats { podman stats "$@"; }
+function pclean { podman system prune -a -f; }
+
+# Inspect & ports
+function pinspect { podman inspect "$@"; }
+function pport { podman port "$@"; }
+complete -F _podman_all_containers pinspect
+complete -F _podman_running_containers pport
+
+# Volume & Network
+function pvols { podman volume ls "$@"; }
+function pvolrm { podman volume rm "$@"; }
+function pnet { podman network ls "$@"; }
+function pnetrm { podman network rm "$@"; }
+complete -F _podman_volumes pvolrm
+
+# Images
+function pbuild { podman build -t "$@"; }
+function ppull { podman pull "$@"; }
+function psave { podman save -o "$@"; }
+function pload { podman load -i "$@"; }
+
+# Pods
+function ppod { podman pod ps "$@"; }
+function ppodcreate { podman pod create --name "$@"; }
+function ppodstart { podman pod start "$@"; }
+function ppodstop { podman pod stop "$@"; }
+function ppodrm { podman pod rm "$@"; }
+
+# Podman Compose
+function pc { podman-compose "$@"; }
+function pcup { podman-compose up -d "$@"; }
+function pcupb { podman-compose up -d --build "$@"; }
+function pcdown { podman-compose down "$@"; }
+function pcrestart { podman-compose restart "$@"; }
+function pclogs { podman-compose logs -f "$@"; }
+function pcps { podman-compose ps "$@"; }
+function pcrm { podman-compose rm "$@"; }
+
+# Utility functions
+
+# Quickly enter a container (tries sh or bash)
+penter() {
+    local cname="$1"
+    if [ -z "$cname" ]; then
+        echo "Usage: penter <container_name>"
+        return 1
+    fi
+    podman exec -it "$cname" /bin/sh 2>/dev/null || podman exec -it "$cname" /bin/bash
+}
+complete -F _podman_running_containers penter
+
+# Stop and remove container
+pstoprm() {
+    local cname="$1"
+    if [ -z "$cname" ]; then
+        echo "Usage: pstoprm <container_name>"
+        echo "    This command will stop and remove the container."
+        return 1
+    fi
+    podman stop "$cname" && podman rm "$cname"
+}
+complete -F _podman_all_containers pstoprm
