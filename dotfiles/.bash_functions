@@ -56,6 +56,8 @@ function _show_bat_info()
         is_charging="$(upower -i "$upower_id" | awk '{ if ($1 ~ "state") print $2}')"
         if [ "$is_charging" == "charging" ]; then
             echo -e "${GREEN}$model battery is at $bat_percentage & charging${NO_COLOR}"
+        elif [ "$is_charging" == "fully-charged" ]; then
+            echo -e "${GREEN}$model battery is fully charged${NO_COLOR}"
         else
             echo -e "${RED}$model battery is at $bat_percentage, discharging${NO_COLOR}"
         fi
