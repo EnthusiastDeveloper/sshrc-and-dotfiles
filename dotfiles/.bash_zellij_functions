@@ -1,0 +1,276 @@
+#!/bin/bash
+# Zellij terminal multiplexer functions
+# Source this file in .bashrc with: [[ -f ~/.bash_zellij_functions ]] && source ~/.bash_zellij_functions
+# Requires: zellij (https://zellij.dev/)
+
+if command -v zellij &> /dev/null; then
+
+    # Enable bash completion
+    source <(zellij setup --generate-completion "$(basename "${SHELL}")")
+
+    # Consistent path variable
+    ZELLIJ_LAYOUT_DIR="$HOME/.config/zellij/layout"
+
+    #################### Aliases ####################
+
+    ## List all zellij sessions with formatting
+    alias zels="zellij list-sessions | sort | column -t"
+    
+    ## List only active (non-exited) sessions
+    alias zela="zellij list-sessions -n | grep -v 'EXITED' | awk '{print \$1}'"
+    
+    ## List only exited sessions
+    alias zele="zellij list-sessions -n | grep 'EXITED' | awk '{print \$1}'"
+
+    ## Predefined layout shortcuts
+    alias zq='zellij -l quad'
+
+    #################### Completion Functions ####################
+
+    ## Completion helper for exited sessions
+    _zellij_exited_sessions() {
+        latest="${COMP_WORDS[$COMP_CWORD]}"
+        output=$(zellij list-sessions -n | grep "EXITED" | awk '{print $1}')
+        mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+    }
+
+    ## Completion helper for all sessions
+    _zellij_all_sessions() {
+        latest="${COMP_WORDS[$COMP_CWORD]}"
+        output=$(zellij list-sessions -n | awk '{print $1}')
+        mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+    }
+
+    ## Completion helper for layouts
+    _complete_zellij_layouts() {
+        latest="${COMP_WORDS[$COMP_CWORD]}"
+        if [[ -d "$ZELLIJ_LAYOUT_DIR" ]]; then
+            output=$(for item in "$ZELLIJ_LAYOUT_DIR"/*.kdl; do 
+                [[ -f "$item" ]] && basename "${item%.*}"
+            done; echo "default")
+            mapfile -t COMPREPLY < <(compgen -W "$output" -- "$latest")
+        fi
+    }
+
+    # Completion helper for project nicknames
+    _zj_proj_completion() {
+        local cur PROJECTS
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        # Add your project nicknames here, separated by spaces
+        PROJECTS="ipdr other"
+        COMPREPLY=( $(compgen -W "${PROJECTS}" -- ${cur}) )
+    }
+
+
+    #################### Core Functions ####################
+
+    ## Create a new zellij session with the given title or attach to an existing one
+    ## Usage: zel [session_name]
+    function zel() {
+        local title
+        if [[ $# -eq 0 ]]; then
+            zellij
+        else
+            title=$1
+            # Set konsole tab title if available
+            command -v set-konsole-tab-title &>/dev/null && set-konsole-tab-title "$title"
+            # Try to attach to an existing session. '-c' flag creates a new session if it doesn't exist
+            zellij attach -c "$title"
+        fi
+    }
+    complete -F _zellij_all_sessions zel
+
+    ## Create a new zellij session with the given layout and title
+    ## Usage: zl <layout> [title]
+    function zl() {
+        local layout=${1:-dev-optimal}
+        local title="${2:-${layout^^}}"
+        
+        case "$layout" in
+            "dev-optimal")
+                title="DEV"
+                export Z_LOGS="$(pwd)"
+                export Z_CODE="$(pwd)"
+                ;;
+            "quad")
+                title="QUAD"
+                export Z_LOGS="$(pwd)"
+                export Z_CODE="$(pwd)"
+                ;;
+            "ipdr")
+                export Z_LOGS="$HOME/jira/ipdr/"
+                export Z_CODE="$HOME/git_repositories/swpkg/cosm-ipdr-exporter/"
+                ;;
+            "mulpi")
+                export Z_LOGS="$HOME/jira/"
+                export Z_CODE="$HOME/git_repositories/swpkg/ulc-mulpi/"
+                ;;
+            *)
+                export Z_LOGS="$(pwd)"
+                export Z_CODE="$(pwd)"
+                ;;
+        esac
+        
+        # Set konsole tab title if available
+        command -v set-konsole-tab-title &>/dev/null && set-konsole-tab-title "$title"
+        zellij --layout "$layout" attach -c "$title"
+    }
+    complete -F _complete_zellij_layouts zl
+
+    #################### Session Management ####################
+
+    ## Delete a given zellij session or all exited sessions if no session name is provided
+    ## Usage: zeld [session_name...]
+    function zeld() {
+        if [[ $# -eq 0 ]]; then
+            # Delete all exited sessions
+            local sessions
+            sessions=$(zellij list-sessions -n 2>/dev/null | grep "EXITED" | awk '{print $1}')
+            if [[ -z "$sessions" ]]; then
+                echo "No exited sessions to delete"
+                return 0
+            fi
+            echo "Deleting exited sessions:"
+            while read -r session_name; do
+                echo "  - $session_name"
+                zellij delete-session "$session_name" 2>/dev/null
+            done <<< "$sessions"
+        else
+            # Delete each specified session
+            for session_name in "$@"; do
+                echo "Deleting session: $session_name"
+                zellij delete-session "$session_name"
+            done
+        fi
+    }
+    complete -F _zellij_exited_sessions zeld
+    complete -F _zellij_exited_sessions "zellij delete-session"
+    complete -F _zellij_exited_sessions "zellij d"
+
+    ## Kill (force delete) active sessions
+    ## Usage: zelk <session_name...>
+    function zelk() {
+        if [[ $# -eq 0 ]]; then
+            echo "Usage: ${FUNCNAME[0]} <session_name...>"
+            echo "Force kill one or more active Zellij sessions"
+            return 1
+        fi
+        for session_name in "$@"; do
+            echo "Killing session: $session_name"
+            zellij kill-session "$session_name"
+        done
+    }
+    complete -F _zellij_all_sessions zelk
+    complete -F _zellij_all_sessions "zellij kill-session"
+    complete -F _zellij_all_sessions "zellij k"
+
+
+    ## Clean up all exited sessions and optionally kill all sessions
+    ## Usage: zelclean [--all]
+    function zelclean() {
+        # Delete all exited sessions
+        echo "=== Cleaning exited sessions ==="
+        zeld
+        
+        # If --all flag is provided, also kill all active sessions
+        echo "=== Cleaning active sessions ==="
+        if [[ "$1" == "--all" ]]; then
+            while read -r session; do
+                zelk "$session"
+            done <<< "$(zellij list-sessions -s)"
+        fi
+    }
+
+    #################### Layout Management ####################
+
+    ## Edit a layout file
+    ## Usage: zeledit [layout_name]
+    function zeledit() {
+        local layout="${1:-dev-optimal}"
+        local layout_file="$ZELLIJ_LAYOUT_DIR/${layout}.kdl"
+        
+        if [[ ! -f "$layout_file" ]]; then
+            echo "Error: Layout file not found: $layout_file"
+            echo ""
+            echo "Available layouts:"
+            if [[ -d "$ZELLIJ_LAYOUT_DIR" ]]; then
+                ls -1 "$ZELLIJ_LAYOUT_DIR"/*.kdl 2>/dev/null | xargs -n1 basename | sed 's/\.kdl$//' | sed 's/^/  - /'
+            fi
+            return 1
+        fi
+        
+        ${EDITOR:-vim} "$layout_file"
+    }
+    complete -F _complete_zellij_layouts zeledit
+
+
+    ## List all available layouts
+    ## Usage: zellayouts
+    function zellayouts() {
+        echo "Available Zellij layouts:"
+        echo "========================="
+        if [[ -d "$ZELLIJ_LAYOUT_DIR" ]]; then
+            for layout in "$ZELLIJ_LAYOUT_DIR"/*.kdl; do
+                if [[ -f "$layout" ]]; then
+                    local name
+                    name=$(basename "${layout%.kdl}")
+                    # Skip swap files
+                    [[ "$name" == *.swap ]] && continue
+                    local swap_indicator=""
+                    [[ -f "${layout%.kdl}.swap.kdl" ]] && swap_indicator=" (+ swap)"
+                    echo "  - $name$swap_indicator"
+                fi
+            done
+        else
+            echo "Layout directory not found: $ZELLIJ_LAYOUT_DIR"
+        fi
+    }
+    alias zll='zellayouts'
+
+    #################### Utility Functions ####################
+
+    ## Show Zellij keybindings cheatsheet
+    ## Usage: zelhelp
+    function zelhelp() {
+        cat << 'EOF'
+╔══════════════════════════════════════════════════════════════════╗
+║              Zellij Custom Functions Cheatsheet                  ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Session Management:                                              ║
+║   zel [name]          - Create/attach to session                 ║
+║   zl <layout> [name]  - Create session with layout               ║
+║   zels                - List all sessions                        ║
+║   zela                - List active sessions only                ║
+║   zele                - List exited sessions only                ║
+║   zeld [name...]      - Delete session(s) or all exited          ║
+║   zelk <name...>      - Force kill active session(s)             ║
+║   zelclean [--all]    - Clean exited sessions (or all)           ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Layout Management:                                               ║
+║   zellayouts (zll)    - List available layouts                   ║
+║   zeledit [layout]    - Edit a layout file                       ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Quick Shortcuts:                                                 ║
+║   zq                  - Launch quad layout                       ║
+╠══════════════════════════════════════════════════════════════════╣
+║ Pane Operations (inside Zellij):                                 ║
+║   zelhelp             - Show this help                           ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Default Zellij Keybindings:
+  Alt + [1-6]       - Switch to tab 1-6
+  Alt + h/l         - Previous/Next tab
+  Alt + n           - New pane
+  Alt + [←↓↑→]      - Navigate panes
+  Alt + x           - Close pane
+  Alt + f           - Toggle fullscreen
+  Ctrl + p + w      - Toggle floating panes
+  Ctrl + p + q      - Quit Zellij
+
+For more information: https://zellij.dev/documentation/
+EOF
+    }
+
+else
+    echo "Warning: Zellij is not installed. Install from https://zellij.dev/"
+fi

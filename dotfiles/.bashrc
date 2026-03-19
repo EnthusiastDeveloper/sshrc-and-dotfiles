@@ -181,6 +181,11 @@ else
     [ -f "$HOME/.bash_usingit_api" ] && [ "$USER" == "$WORK_USERNAME" ] && . "$HOME/.bash_usingit_api"
 fi
 
+# Source bash_zellij_functions if zellij is installed
+if command -v zellij &>/dev/null && [ -f "$HOME/.bash_zellij_functions" ]; then
+    . "$HOME/.bash_zellij_functions"
+fi
+
 # Source bash_git_functions if git is installed
 if command -v git &>/dev/null; then
     if [ -f "$HOME/.bash_git_functions" ]; then
